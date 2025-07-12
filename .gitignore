@@ -1,4 +1,39 @@
+# Rust build artifacts
 /target
 /Cargo.lock
+
+# Editor files
 *.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Debug files
+*.pdb
+
+# Backup files
+*.bak
+*.orig
+
+# Coverage reports
+tarpaulin-report.html
+cobertura.xml
+coverage.xml
+*.profraw
+*.profdata
+
+# Benchmark results
+/target/criterion
+
+# Documentation
+/target/doc
+
+# Temporary files
+*.tmp
+.temp/

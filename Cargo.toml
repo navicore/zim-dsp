@@ -5,6 +5,9 @@ edition = "2021"
 license = "MIT"
 authors = ["Ed Sweeney <ed@onextent.com>"]
 description = "Text-based modular synthesizer environment"
+repository = "https://github.com/navicore/zim-dsp"
+keywords = ["audio", "synthesizer", "modular", "dsp", "music"]
+categories = ["multimedia::audio", "command-line-utilities"]
 
 [dependencies]
 fundsp = "0.18"

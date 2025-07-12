@@ -1,3 +1,9 @@
+//! Zim-DSP - Text-based modular synthesizer
+//!
+//! This is the main entry point for the zim-dsp CLI application.
+
+#![allow(clippy::multiple_crate_versions)] // Dependencies have conflicting sub-dependencies
+
 use anyhow::Result;
 use std::io::{self, BufRead, BufReader};
 
@@ -9,8 +15,8 @@ use engine::Engine;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    
-    match args.get(1).map(|s| s.as_str()) {
+
+    match args.get(1).map(String::as_str) {
         Some("play") => {
             if let Some(patch_file) = args.get(2) {
                 play_patch(patch_file)?;
@@ -21,49 +27,50 @@ fn main() -> Result<()> {
         Some("repl") => {
             run_repl()?;
         }
-        Some("help") | Some("-h") | Some("--help") => {
+        Some("help" | "-h" | "--help") | None => {
             print_help();
         }
-        _ => {
+        Some(_) => {
+            eprintln!("Unknown command. Use 'help' to see available commands.");
             print_help();
         }
     }
-    
+
     Ok(())
 }
 
 fn play_patch(patch_file: &str) -> Result<()> {
-    println!("Loading patch: {}", patch_file);
-    
-    let mut engine = Engine::new()?;
+    println!("Loading patch: {patch_file}");
+
+    let mut engine = Engine::new();
     let patch_content = std::fs::read_to_string(patch_file)?;
-    
+
     engine.load_patch(&patch_content)?;
     engine.start()?;
-    
+
     println!("Playing... Press Enter to stop");
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
-    
+
     engine.stop();
     Ok(())
 }
 
 fn run_repl() -> Result<()> {
     println!("Zim-DSP REPL - Type 'help' for commands, 'quit' to exit");
-    
-    let mut engine = Engine::new()?;
+
+    let mut engine = Engine::new();
     let stdin = io::stdin();
     let mut reader = BufReader::new(stdin);
-    
+
     loop {
         print!("> ");
         io::Write::flush(&mut io::stdout())?;
-        
+
         let mut input = String::new();
         reader.read_line(&mut input)?;
         let input = input.trim();
-        
+
         match input {
             "quit" | "exit" => break,
             "help" => print_repl_help(),
@@ -82,18 +89,19 @@ fn run_repl() -> Result<()> {
             _ => {
                 // Try to parse as patch command
                 match engine.process_line(input) {
-                    Ok(msg) => println!("{}", msg),
-                    Err(e) => eprintln!("Error: {}", e),
+                    Ok(msg) => println!("{msg}"),
+                    Err(e) => eprintln!("Error: {e}"),
                 }
             }
         }
     }
-    
+
     Ok(())
 }
 
 fn print_help() {
-    println!("Zim-DSP - Text-based modular synthesizer
+    println!(
+        "Zim-DSP - Text-based modular synthesizer
     
 Usage:
     zim-dsp play <patch_file>    Play a patch file
@@ -102,11 +110,13 @@ Usage:
 
 Examples:
     zim-dsp play examples/basic_patch.zim
-    zim-dsp repl");
+    zim-dsp repl"
+    );
 }
 
 fn print_repl_help() {
-    println!("REPL Commands:
+    println!(
+        "REPL Commands:
     help     - Show this help
     start    - Start audio processing
     stop     - Stop audio processing  
@@ -116,5 +126,6 @@ fn print_repl_help() {
 Patch Syntax:
     vco: osc saw 440            - Create oscillator
     vcf: filter moog <- vco     - Create filter with input
-    out <- vcf * 0.5            - Route to output");
+    out <- vcf * 0.5            - Route to output"
+    );
 }

@@ -1,0 +1,23 @@
+# Clippy configuration for strict linting
+# This matches the settings in our CI pipeline
+
+# Set the maximum cognitive complexity allowed
+cognitive-complexity-threshold = 30
+
+# Set the maximum number of lines a single function can have
+too-many-lines-threshold = 100
+
+# Set the maximum number of arguments a function can have
+too-many-arguments-threshold = 7
+
+# Set the maximum number of lines a single type can have
+type-complexity-threshold = 250
+
+# Allow certain lints that might be too pedantic for this project
+# (Add specific allows here if needed as the project evolves)
+
+# Warn on TODOs (useful for tracking technical debt)
+warn-on-all-wildcard-imports = true
+
+# Set MSRV (Minimum Supported Rust Version)
+msrv = "1.70.0"
