@@ -10,7 +10,7 @@ use crate::parser::{parse_line, Command};
 pub struct Engine {
     modules: HashMap<String, Box<dyn Module>>,
     connections: Vec<Connection>,
-    audio_graph: Option<Box<dyn AudioUnit64>>,
+    audio_graph: Option<Box<dyn AudioUnit>>,
     stream: Option<cpal::Stream>,
     is_running: bool,
 }
@@ -51,17 +51,17 @@ impl Engine {
     pub fn process_line(&mut self, line: &str) -> Result<String> {
         let command = parse_line(line)?;
         
-        match command {
+        match &command {
             Command::CreateModule { name, module_type, params } => {
-                self.create_module(name, module_type, params)?;
+                self.create_module(name.clone(), *module_type, params.clone())?;
                 Ok(format!("Created module: {}", command))
             }
             Command::Connect { from, to } => {
-                self.add_connection(from, to)?;
+                self.add_connection(from.clone(), to.clone())?;
                 Ok(format!("Connected: {}", command))
             }
             Command::SetParam { module, param, value } => {
-                self.set_parameter(module, param, value)?;
+                self.set_parameter(module.clone(), param.clone(), *value)?;
                 Ok(format!("Set parameter: {}", command))
             }
         }
@@ -91,10 +91,9 @@ impl Engine {
         let config = device.default_output_config()?;
         
         // For now, just play a test tone
-        let sample_rate = config.sample_rate().0 as f64;
         let test_graph = sine_hz(440.0) * 0.1 >> pan(0.0);
         
-        let mut graph = Box::new(test_graph);
+        let graph = Box::new(test_graph);
         
         self.stream = Some(self.run_output(device, config.into(), graph)?);
         self.is_running = true;
@@ -155,7 +154,7 @@ impl Engine {
         &self,
         device: cpal::Device,
         config: cpal::StreamConfig,
-        mut graph: Box<dyn AudioUnit64>,
+        mut graph: Box<dyn AudioUnit>,
     ) -> Result<cpal::Stream> {
         let sample_rate = config.sample_rate.0 as f64;
         graph.set_sample_rate(sample_rate);
