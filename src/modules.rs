@@ -1,22 +1,28 @@
-use anyhow::{Result, anyhow};
-use fundsp::prelude::*;
+//! Module system for the zim-dsp modular synthesizer.
+//!
+//! This module defines the trait for audio modules and provides implementations
+//! for basic synthesis modules like oscillators, filters, and envelopes.
+
+use anyhow::{anyhow, Result};
 
 /// Trait for all modules in the system
+#[allow(dead_code)] // TODO: Will be used when graph building is implemented
 pub trait Module: Send {
     /// Process audio/control signals
     fn process(&mut self, inputs: &[f64], outputs: &mut [f64]);
-    
+
     /// Set a parameter by name
     fn set_param(&mut self, name: &str, value: f32) -> Result<()>;
-    
+
     /// Get current parameter value
     fn get_param(&self, name: &str) -> Option<f32>;
-    
+
     /// Get module info
     fn info(&self) -> ModuleInfo;
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // TODO: Will be used when modules are fully implemented
 pub struct ModuleInfo {
     pub name: String,
     pub inputs: Vec<String>,
@@ -24,7 +30,7 @@ pub struct ModuleInfo {
     pub params: Vec<(String, f32, f32)>, // (name, min, max)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModuleType {
     Oscillator,
     Filter,
@@ -37,12 +43,12 @@ pub enum ModuleType {
 impl std::fmt::Display for ModuleType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ModuleType::Oscillator => write!(f, "osc"),
-            ModuleType::Filter => write!(f, "filter"),
-            ModuleType::Envelope => write!(f, "env"),
-            ModuleType::Vca => write!(f, "vca"),
-            ModuleType::Mixer => write!(f, "mix"),
-            ModuleType::Output => write!(f, "out"),
+            Self::Oscillator => write!(f, "osc"),
+            Self::Filter => write!(f, "filter"),
+            Self::Envelope => write!(f, "env"),
+            Self::Vca => write!(f, "vca"),
+            Self::Mixer => write!(f, "mix"),
+            Self::Output => write!(f, "out"),
         }
     }
 }
@@ -56,19 +62,21 @@ pub fn parse_module_type(s: &str) -> Result<ModuleType> {
         "vca" => Ok(ModuleType::Vca),
         "mix" | "mixer" => Ok(ModuleType::Mixer),
         "out" | "output" => Ok(ModuleType::Output),
-        _ => Err(anyhow!("Unknown module type: {}", s)),
+        _ => Err(anyhow!("Unknown module type: {s}")),
     }
 }
 
 /// Create a module instance
-pub fn create_module(module_type: ModuleType, params: Vec<f32>) -> Result<Box<dyn Module>> {
+pub fn create_module(module_type: ModuleType, params: &[f32]) -> Result<Box<dyn Module>> {
     match module_type {
-        ModuleType::Oscillator => Ok(Box::new(Oscillator::new(params)?)),
-        _ => Err(anyhow!("Module type {:?} not yet implemented", module_type)),
+        ModuleType::Oscillator => Ok(Box::new(Oscillator::new(params))),
+        _ => Err(anyhow!("Module type {module_type:?} not yet implemented")),
     }
 }
 
-// Example oscillator module implementation
+/// Basic oscillator module implementation.
+///
+/// Supports sine, saw, and square waveforms.
 pub struct Oscillator {
     frequency: f32,
     waveform: String,
@@ -77,15 +85,15 @@ pub struct Oscillator {
 }
 
 impl Oscillator {
-    fn new(params: Vec<f32>) -> Result<Self> {
-        let frequency = params.get(0).copied().unwrap_or(440.0);
-        
-        Ok(Oscillator {
+    fn new(params: &[f32]) -> Self {
+        let frequency = params.first().copied().unwrap_or(440.0);
+
+        Self {
             frequency,
             waveform: "sine".to_string(),
             phase: 0.0,
-            sample_rate: 44100.0,
-        })
+            sample_rate: 44_100.0,
+        }
     }
 }
 
@@ -94,49 +102,53 @@ impl Module for Oscillator {
         if outputs.is_empty() {
             return;
         }
-        
-        let phase_inc = self.frequency as f64 / self.sample_rate;
-        
+
+        let phase_inc = f64::from(self.frequency) / self.sample_rate;
+
         for output in outputs.iter_mut() {
             *output = match self.waveform.as_str() {
                 "sine" => (self.phase * 2.0 * std::f64::consts::PI).sin(),
-                "saw" => (self.phase * 2.0) - 1.0,
-                "square" => if self.phase < 0.5 { 1.0 } else { -1.0 },
+                "saw" => self.phase.mul_add(2.0, -1.0),
+                "square" => {
+                    if self.phase < 0.5 {
+                        1.0
+                    } else {
+                        -1.0
+                    }
+                }
                 _ => 0.0,
             };
-            
+
             self.phase += phase_inc;
             if self.phase >= 1.0 {
                 self.phase -= 1.0;
             }
         }
     }
-    
+
     fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
         match name {
             "freq" | "frequency" => {
                 self.frequency = value;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
-    
+
     fn get_param(&self, name: &str) -> Option<f32> {
         match name {
             "freq" | "frequency" => Some(self.frequency),
             _ => None,
         }
     }
-    
+
     fn info(&self) -> ModuleInfo {
         ModuleInfo {
             name: "Oscillator".to_string(),
             inputs: vec![],
             outputs: vec!["out".to_string()],
-            params: vec![
-                ("frequency".to_string(), 20.0, 20000.0),
-            ],
+            params: vec![("frequency".to_string(), 20.0, 20_000.0)],
         }
     }
 }
