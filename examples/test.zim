@@ -1,0 +1,3 @@
+# Simple test patch
+vco: osc 440
+out <- vco

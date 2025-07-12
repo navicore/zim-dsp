@@ -1,0 +1,12 @@
+[package]
+name = "zim-dsp"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Ed Sweeney <ed@onextent.com>"]
+description = "Text-based modular synthesizer environment"
+
+[dependencies]
+fundsp = "0.18"
+cpal = "0.15"
+anyhow = "1.0"
