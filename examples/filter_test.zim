@@ -1,0 +1,11 @@
+# Test filter with oscillator
+vco: osc saw 220
+vcf: filter
+vcf.cutoff <- 800
+vcf.res <- 0.7
+
+# Connect oscillator to filter
+vcf <- vco
+
+# Connect filter to output
+out <- vcf
