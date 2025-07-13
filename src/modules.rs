@@ -19,10 +19,10 @@ pub trait Module: Send {
 
     /// Get module info
     fn info(&self) -> ModuleInfo;
-    
+
     /// Get the module type
     fn module_type(&self) -> ModuleType;
-    
+
     /// Get oscillator-specific info (returns None for non-oscillators)
     fn as_oscillator(&self) -> Option<OscillatorInfo> {
         None
@@ -100,16 +100,16 @@ pub struct Oscillator {
 }
 
 impl Oscillator {
+    #[allow(clippy::cast_possible_truncation)]
     fn new(params: &[f32]) -> Self {
         let mut frequency = 440.0;
         let mut waveform = "sine".to_string();
-        
+
         // Check if first param is waveform encoding (negative number)
         if let Some(&first) = params.first() {
             if first < 0.0 {
                 // It's a waveform encoding
                 waveform = match first as i32 {
-                    -1 => "sine".to_string(),
                     -2 => "saw".to_string(),
                     -3 => "square".to_string(),
                     -4 => "triangle".to_string(),
@@ -122,7 +122,7 @@ impl Oscillator {
                 frequency = first;
             }
         }
-        
+
         Self {
             frequency,
             waveform,
@@ -130,8 +130,9 @@ impl Oscillator {
             sample_rate: 44_100.0,
         }
     }
-    
+
     /// Get the waveform type
+    #[allow(dead_code)]
     pub fn waveform(&self) -> &str {
         &self.waveform
     }
@@ -166,6 +167,7 @@ impl Module for Oscillator {
         }
     }
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
         match name {
             "freq" | "frequency" => {
@@ -201,11 +203,11 @@ impl Module for Oscillator {
             params: vec![("frequency".to_string(), 20.0, 20_000.0)],
         }
     }
-    
+
     fn module_type(&self) -> ModuleType {
         ModuleType::Oscillator
     }
-    
+
     fn as_oscillator(&self) -> Option<OscillatorInfo> {
         Some(OscillatorInfo {
             frequency: self.frequency,

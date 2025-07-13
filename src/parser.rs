@@ -53,17 +53,17 @@ pub fn parse_line(line: &str) -> Result<Command> {
         }
 
         let module_type = parse_module_type(parts[0])?;
-        
+
         // For oscillators, check if waveform is specified
         let mut params: Vec<f32> = Vec::new();
         let mut waveform: Option<String> = None;
-        
+
         for (i, part) in parts[1..].iter().enumerate() {
             if i == 0 && module_type == ModuleType::Oscillator {
                 // First param for oscillator might be waveform
                 match *part {
                     "sine" | "saw" | "square" | "tri" | "triangle" => {
-                        waveform = Some(part.to_string());
+                        waveform = Some((*part).to_string());
                         continue;
                     }
                     _ => {}
@@ -74,12 +74,11 @@ pub fn parse_line(line: &str) -> Result<Command> {
                 params.push(num);
             }
         }
-        
+
         // Store waveform in params for now (hack - we'll improve this later)
         if let Some(wf) = waveform {
             // Encode waveform as a special negative number
             let wf_code = match wf.as_str() {
-                "sine" => -1.0,
                 "saw" => -2.0,
                 "square" => -3.0,
                 "tri" | "triangle" => -4.0,
