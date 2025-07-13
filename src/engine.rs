@@ -4,7 +4,7 @@
 
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use fundsp::prelude::{pan, sine_hz, AudioUnit};
+use fundsp::prelude::{pan, saw_hz, sine_hz, square_hz, triangle_hz, zero, AudioUnit};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -159,8 +159,52 @@ impl Engine {
     }
 
     fn rebuild_graph(&mut self) {
-        // TODO: Build actual graph from modules and connections
-        // For now, just create a simple test graph
+        // Build the audio graph from modules and connections
+        
+        // Find what connects to the output
+        let output_sources: Vec<_> = self
+            .connections
+            .iter()
+            .filter(|conn| conn.to_module == "out")
+            .collect();
+
+        if output_sources.is_empty() {
+            // No output connection, create silence
+            let graph = zero() >> pan(0.0);
+            self.audio_graph = Some(Box::new(graph));
+            return;
+        }
+
+        // For now, handle simple case: single source -> output
+        if let Some(output_conn) = output_sources.first() {
+            let source_name = &output_conn.from_module;
+            
+            // Look up the source module
+            if let Some(module) = self.modules.get(source_name) {
+                // Check module type
+                match module.module_type() {
+                    ModuleType::Oscillator => {
+                        if let Some(osc_info) = module.as_oscillator() {
+                            let graph: Box<dyn AudioUnit> = match osc_info.waveform.as_str() {
+                                "sine" => Box::new(sine_hz(osc_info.frequency) * 0.1 >> pan(0.0)),
+                                "saw" => Box::new(saw_hz(osc_info.frequency) * 0.1 >> pan(0.0)),
+                                "square" => Box::new(square_hz(osc_info.frequency) * 0.1 >> pan(0.0)),
+                                "triangle" | "tri" => Box::new(triangle_hz(osc_info.frequency) * 0.1 >> pan(0.0)),
+                                _ => Box::new(sine_hz(osc_info.frequency) * 0.1 >> pan(0.0)),
+                            };
+                            
+                            self.audio_graph = Some(graph);
+                            return;
+                        }
+                    }
+                    _ => {
+                        // Other module types not yet implemented
+                    }
+                }
+            }
+        }
+
+        // Fallback to test tone if we can't build the graph
         let graph = (sine_hz(440.0) * 0.1) >> pan(0.0);
         self.audio_graph = Some(Box::new(graph));
     }

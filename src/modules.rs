@@ -19,6 +19,21 @@ pub trait Module: Send {
 
     /// Get module info
     fn info(&self) -> ModuleInfo;
+    
+    /// Get the module type
+    fn module_type(&self) -> ModuleType;
+    
+    /// Get oscillator-specific info (returns None for non-oscillators)
+    fn as_oscillator(&self) -> Option<OscillatorInfo> {
+        None
+    }
+}
+
+/// Information about an oscillator
+#[derive(Debug, Clone)]
+pub struct OscillatorInfo {
+    pub frequency: f32,
+    pub waveform: String,
 }
 
 #[derive(Debug, Clone)]
@@ -86,14 +101,39 @@ pub struct Oscillator {
 
 impl Oscillator {
     fn new(params: &[f32]) -> Self {
-        let frequency = params.first().copied().unwrap_or(440.0);
-
+        let mut frequency = 440.0;
+        let mut waveform = "sine".to_string();
+        
+        // Check if first param is waveform encoding (negative number)
+        if let Some(&first) = params.first() {
+            if first < 0.0 {
+                // It's a waveform encoding
+                waveform = match first as i32 {
+                    -1 => "sine".to_string(),
+                    -2 => "saw".to_string(),
+                    -3 => "square".to_string(),
+                    -4 => "triangle".to_string(),
+                    _ => "sine".to_string(),
+                };
+                // Get frequency from second param
+                frequency = params.get(1).copied().unwrap_or(440.0);
+            } else {
+                // First param is frequency
+                frequency = first;
+            }
+        }
+        
         Self {
             frequency,
-            waveform: "sine".to_string(),
+            waveform,
             phase: 0.0,
             sample_rate: 44_100.0,
         }
+    }
+    
+    /// Get the waveform type
+    pub fn waveform(&self) -> &str {
+        &self.waveform
     }
 }
 
@@ -132,6 +172,16 @@ impl Module for Oscillator {
                 self.frequency = value;
                 Ok(())
             }
+            "waveform" => {
+                // For now, validate against known waveforms
+                match value as u32 {
+                    0 => self.waveform = "sine".to_string(),
+                    1 => self.waveform = "saw".to_string(),
+                    2 => self.waveform = "square".to_string(),
+                    _ => return Err(anyhow!("Invalid waveform index")),
+                }
+                Ok(())
+            }
             _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
@@ -150,5 +200,16 @@ impl Module for Oscillator {
             outputs: vec!["out".to_string()],
             params: vec![("frequency".to_string(), 20.0, 20_000.0)],
         }
+    }
+    
+    fn module_type(&self) -> ModuleType {
+        ModuleType::Oscillator
+    }
+    
+    fn as_oscillator(&self) -> Option<OscillatorInfo> {
+        Some(OscillatorInfo {
+            frequency: self.frequency,
+            waveform: self.waveform.clone(),
+        })
     }
 }
