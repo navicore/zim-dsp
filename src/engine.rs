@@ -172,27 +172,92 @@ impl Engine {
             return;
         }
 
-        // For now, handle simple case: single source -> output
+        // Check for simple routing patterns
         if let Some(output_conn) = output_sources.first() {
-            let source_name = &output_conn.from_module;
+            let final_module_name = &output_conn.from_module;
+
+            // Check if this module has an input connection
+            let input_to_final =
+                self.connections.iter().find(|conn| &conn.to_module == final_module_name);
+
+            // Handle oscillator -> filter -> output pattern
+            if let Some(input_conn) = input_to_final {
+                let source_name = &input_conn.from_module;
+
+                if let (Some(source_module), Some(final_module)) =
+                    (self.modules.get(source_name), self.modules.get(final_module_name))
+                {
+                    // Check if it's oscillator -> filter
+                    if source_module.module_type() == ModuleType::Oscillator
+                        && final_module.module_type() == ModuleType::Filter
+                    {
+                        if let (Some(osc_info), Some(filter_info)) =
+                            (source_module.as_oscillator(), final_module.as_filter())
+                        {
+                            // Build complete graph with oscillator and filter
+                            // TODO: Implement proper filter - for now just apply gain based on cutoff
+                            let filter_gain = (filter_info.cutoff / 20000.0).min(1.0);
+
+                            let graph: Box<dyn AudioUnit> = match osc_info.waveform.as_str() {
+                                "saw" => Box::new(
+                                    (saw_hz(osc_info.frequency) * 0.1 * filter_gain) >> pan(0.0),
+                                ),
+                                "square" => Box::new(
+                                    (square_hz(osc_info.frequency) * 0.1 * filter_gain) >> pan(0.0),
+                                ),
+                                "triangle" | "tri" => Box::new(
+                                    (triangle_hz(osc_info.frequency) * 0.1 * filter_gain)
+                                        >> pan(0.0),
+                                ),
+                                _ => Box::new(
+                                    (sine_hz(osc_info.frequency) * 0.1 * filter_gain) >> pan(0.0),
+                                ),
+                            };
+
+                            self.audio_graph = Some(graph);
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Fall back to single module -> output
+            let source_name = final_module_name;
 
             // Look up the source module
             if let Some(module) = self.modules.get(source_name) {
                 // Check module type
-                if module.module_type() == ModuleType::Oscillator {
-                    if let Some(osc_info) = module.as_oscillator() {
-                        let graph: Box<dyn AudioUnit> = match osc_info.waveform.as_str() {
-                            "saw" => Box::new((saw_hz(osc_info.frequency) * 0.1) >> pan(0.0)),
-                            "square" => Box::new((square_hz(osc_info.frequency) * 0.1) >> pan(0.0)),
-                            "triangle" | "tri" => {
-                                Box::new((triangle_hz(osc_info.frequency) * 0.1) >> pan(0.0))
-                            }
-                            _ => Box::new((sine_hz(osc_info.frequency) * 0.1) >> pan(0.0)),
-                        };
+                match module.module_type() {
+                    ModuleType::Oscillator => {
+                        if let Some(osc_info) = module.as_oscillator() {
+                            let graph: Box<dyn AudioUnit> = match osc_info.waveform.as_str() {
+                                "saw" => Box::new((saw_hz(osc_info.frequency) * 0.1) >> pan(0.0)),
+                                "square" => {
+                                    Box::new((square_hz(osc_info.frequency) * 0.1) >> pan(0.0))
+                                }
+                                "triangle" | "tri" => {
+                                    Box::new((triangle_hz(osc_info.frequency) * 0.1) >> pan(0.0))
+                                }
+                                _ => Box::new((sine_hz(osc_info.frequency) * 0.1) >> pan(0.0)),
+                            };
 
-                        self.audio_graph = Some(graph);
-                        return;
+                            self.audio_graph = Some(graph);
+                            return;
+                        }
                     }
+                    ModuleType::Filter => {
+                        if let Some(filter_info) = module.as_filter() {
+                            // For now, filter needs an input - just use test tone
+                            // TODO: Implement proper routing and filtering
+                            let filter_gain = (filter_info.cutoff / 20000.0).min(1.0);
+                            let graph: Box<dyn AudioUnit> =
+                                Box::new((sine_hz(440.0) * 0.2 * filter_gain) >> pan(0.0));
+
+                            self.audio_graph = Some(graph);
+                            return;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }

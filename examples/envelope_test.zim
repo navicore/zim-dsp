@@ -1,0 +1,14 @@
+# Test envelope with oscillator
+vco: osc sine 440
+env: env 0.1 0.5
+
+# Set envelope parameters (100ms attack, 500ms decay)
+env.attack <- 0.1
+env.decay <- 0.5
+
+# For now, manually trigger the envelope
+env.trigger <- 1.0
+
+# Connect oscillator to output
+# (envelope not connected yet - need VCA for that)
+out <- vco
