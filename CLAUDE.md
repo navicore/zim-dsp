@@ -42,10 +42,16 @@ Zim-DSP is a text-based modular synthesizer environment inspired by hardware mod
 - ✅ DSL parser for modules, connections, parameters
 - ✅ Module trait system
 - ✅ Engine structure with cpal audio output
-- ⚠️  Currently plays test tone only (graph building not implemented)
+- ✅ Basic graph building from modules/connections
+- ✅ Oscillator module (sine, saw, square, triangle)
+- ✅ Filter module (placeholder - just gain stage)
+- ✅ Envelope module (AD type)
+- ✅ VCA module
+- ✅ Simple envelope triggering (restarts graph when envelope present)
+- ⚠️  Module trait not fully integrated with fundsp
 - ❌ Neovim plugin not started
 - ❌ Hot reload not implemented
-- ❌ Only oscillator module stubbed out
+- ❌ Multi-input routing not implemented
 
 ### DSL Syntax
 ```
@@ -127,10 +133,31 @@ cargo run -- repl
 
 ## Current Challenges
 
-1. Need to implement actual graph building from parsed commands
-2. Module trait needs to integrate with fundsp AudioUnit trait
-3. Hot reload will require careful state management
-4. Performance considerations for real-time audio
+1. Module trait and fundsp AudioUnit integration - currently using a hack where presence of envelope module adds AD envelope to oscillators
+2. Need proper module graph execution that processes our Module trait instances
+3. Multi-input routing (e.g., envelope -> VCA control input)
+4. Hot reload will require careful state management
+5. Performance considerations for real-time audio
+
+## Recent Progress
+
+### Modules Implemented
+- **Oscillator**: Supports sine, saw, square, triangle waveforms
+- **Filter**: Placeholder that applies gain based on cutoff frequency
+- **Envelope**: AD envelope generator with attack/decay times
+- **VCA**: Voltage controlled amplifier with gain control
+
+### Envelope Integration
+Currently, when an envelope module is present in the patch, oscillators automatically get an AD envelope applied. This is a temporary solution - proper implementation needs:
+1. A way to execute our Module trait's process() method in the audio callback
+2. Multi-input routing so envelope output can modulate VCA/filter
+3. Trigger mechanism (currently using engine restart)
+
+### Next Steps for Envelope->VCA
+1. Create a module graph executor that can process Module trait objects
+2. Implement connection routing between module inputs/outputs
+3. Add proper trigger mechanism for envelopes
+4. Test with oscillator->VCA (modulated by envelope) patches
 
 ## Example of Future Convergence
 

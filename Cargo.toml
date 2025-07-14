@@ -9,7 +9,19 @@ repository = "https://github.com/navicore/zim-dsp"
 keywords = ["audio", "synthesizer", "modular", "dsp", "music"]
 categories = ["multimedia::audio", "command-line-utilities"]
 
+[lib]
+name = "zim_dsp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zim-dsp"
+path = "src/main.rs"
+
 [dependencies]
-fundsp = "0.18"
+fundsp = { version = "0.18", default-features = false, features = ["std"] }
 cpal = "0.15"
 anyhow = "1.0"
+
+[[example]]
+name = "graph_test"
+path = "examples/graph_test.rs"

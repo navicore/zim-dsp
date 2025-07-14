@@ -7,11 +7,13 @@
 use anyhow::Result;
 use std::io::{self, BufRead, BufReader};
 
-mod engine;
+mod graph;
+mod graph_engine;
+mod graph_modules;
 mod modules;
 mod parser;
 
-use engine::Engine;
+use graph_engine::GraphEngine;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -42,7 +44,7 @@ fn main() -> Result<()> {
 fn play_patch(patch_file: &str) -> Result<()> {
     println!("Loading patch: {patch_file}");
 
-    let mut engine = Engine::new();
+    let mut engine = GraphEngine::new();
     let patch_content = std::fs::read_to_string(patch_file)?;
 
     engine.load_patch(&patch_content)?;
@@ -59,7 +61,7 @@ fn play_patch(patch_file: &str) -> Result<()> {
 fn run_repl() -> Result<()> {
     println!("Zim-DSP REPL - Type 'help' for commands, 'quit' to exit");
 
-    let mut engine = Engine::new();
+    let mut engine = GraphEngine::new();
     let stdin = io::stdin();
     let mut reader = BufReader::new(stdin);
 
@@ -86,11 +88,54 @@ fn run_repl() -> Result<()> {
                 engine.clear_patch();
                 println!("Patch cleared");
             }
+            "list" => {
+                let modules = engine.list_modules();
+                if modules.is_empty() {
+                    println!("No modules loaded");
+                } else {
+                    println!("Modules:");
+                    for module in modules {
+                        println!("  - {module}");
+                    }
+                }
+            }
+            "validate" => {
+                let errors = engine.validate_connections();
+                if errors.is_empty() {
+                    println!("✓ All connections are valid");
+                } else {
+                    println!("Connection errors:");
+                    for error in errors {
+                        println!("  - {error}");
+                    }
+                }
+            }
             _ => {
-                // Try to parse as patch command
-                match engine.process_line(input) {
-                    Ok(msg) => println!("{msg}"),
-                    Err(e) => eprintln!("Error: {e}"),
+                // Check for inspect command
+                if let Some(module_name) = input.strip_prefix("inspect ") {
+                    let module_name = module_name.trim();
+                    if let Some(info) = engine.inspect_module(module_name) {
+                        println!("Module: {}", info.name);
+                        println!("  Inputs:");
+                        for input in &info.inputs {
+                            println!(
+                                "    - {} (default: {}): {}",
+                                input.name, input.default_value, input.description
+                            );
+                        }
+                        println!("  Outputs:");
+                        for output in &info.outputs {
+                            println!("    - {}: {}", output.name, output.description);
+                        }
+                    } else {
+                        eprintln!("Module '{module_name}' not found");
+                    }
+                } else {
+                    // Try to parse as patch command
+                    match engine.process_line(input) {
+                        Ok(msg) => println!("{msg}"),
+                        Err(e) => eprintln!("Error: {e}"),
+                    }
                 }
             }
         }
@@ -110,22 +155,33 @@ Usage:
 
 Examples:
     zim-dsp play examples/basic_patch.zim
-    zim-dsp repl"
+    zim-dsp repl
+"
     );
 }
 
 fn print_repl_help() {
     println!(
         "REPL Commands:
-    help     - Show this help
-    start    - Start audio processing
-    stop     - Stop audio processing  
-    clear    - Clear current patch
-    quit     - Exit REPL
+    help      - Show this help
+    start     - Start audio processing
+    stop      - Stop audio processing
+    clear     - Clear current patch
+    list      - List all modules
+    inspect   - Inspect a module's ports
+    validate  - Validate all connections
+    quit      - Exit REPL
     
 Patch Syntax:
-    vco: osc saw 440            - Create oscillator
-    vcf: filter moog <- vco     - Create filter with input
-    out <- vcf * 0.5            - Route to output"
+    vco: osc sine 440           - Create oscillator
+    vcf: filter moog            - Create filter
+    env: envelope 0.01 0.1      - Create envelope
+    vca: vca 1.0                - Create VCA
+    
+Connections:
+    vcf.audio <- vco.sine       - Simple connection
+    vca.cv <- env.output        - Control voltage
+    vcf.cutoff <- lfo.sine * 2000 + 1000  - Scaled/offset
+    out <- vca.output           - Route to output"
     );
 }

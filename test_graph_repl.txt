@@ -1,0 +1,19 @@
+help
+vco: osc sine 440
+list
+inspect vco
+lfo: osc sine 2
+vcf: filter 1000 0.7
+list
+inspect vcf
+vcf.audio <- vco.sine
+vcf.cutoff <- lfo.sine * 2000 + 1000
+validate
+env: env 0.01 0.5
+vca: vca 1.0
+vca.audio <- vcf.lp
+vca.cv <- env.out
+out <- vca.out
+validate
+list
+quit
