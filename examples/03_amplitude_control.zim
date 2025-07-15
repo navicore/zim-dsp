@@ -1,0 +1,15 @@
+# VCA (Voltage Controlled Amplifier) example
+# Shows how to control amplitude with an envelope
+
+vco: osc sine 440
+env: envelope 0.01 0.5  # 10ms attack, 500ms decay
+vca: vca 1.0
+
+# Audio path: oscillator -> VCA audio input
+vca.audio <- vco.sine
+
+# Control path: envelope -> VCA control voltage
+vca.cv <- env.out
+
+# Output
+out <- vca.out

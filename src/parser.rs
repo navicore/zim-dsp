@@ -37,6 +37,8 @@ impl std::fmt::Display for Command {
 pub fn parse_line(line: &str) -> Result<Command> {
     let line = line.trim();
 
+    let line = line.find(" #").map_or(line, |comment_pos| line[..comment_pos].trim());
+
     // Skip empty lines and comments
     if line.is_empty() || line.starts_with('#') {
         return Err(anyhow!("Empty or comment line"));

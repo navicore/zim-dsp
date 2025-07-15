@@ -1,3 +1,0 @@
-# Test different waveforms
-vco: osc saw 220
-out <- vco

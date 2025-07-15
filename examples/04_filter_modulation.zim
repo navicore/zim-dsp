@@ -1,0 +1,16 @@
+# Filter modulation example
+# Demonstrates LFO modulating filter cutoff frequency
+
+vco: osc saw 110      # Sawtooth wave at 110 Hz
+lfo: osc sine 0.5     # LFO at 0.5 Hz
+vcf: filter 1000 0.7  # Filter with 1kHz cutoff, 0.7 resonance
+
+# Audio routing
+vcf.audio <- vco.saw
+
+# Modulation routing with scaling and offset
+# LFO sweeps filter cutoff between 500 Hz and 2500 Hz
+vcf.cutoff <- lfo.sine * 1000 + 1500
+
+# Output the filtered signal
+out <- vcf.lp  # Use lowpass output

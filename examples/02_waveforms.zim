@@ -1,0 +1,10 @@
+# Different waveform outputs
+# Oscillators provide multiple waveform outputs simultaneously
+
+vco: osc sine 220
+
+# You can choose which waveform to use:
+# out <- vco.sine
+# out <- vco.saw
+# out <- vco.square
+out <- vco.triangle

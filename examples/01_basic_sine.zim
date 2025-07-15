@@ -1,0 +1,5 @@
+# Basic sine wave oscillator
+# Demonstrates the simplest possible patch
+
+vco: osc sine 440
+out <- vco.sine

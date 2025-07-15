@@ -1,0 +1,25 @@
+# Complex routing example
+# Multiple oscillators, filter with envelope control
+
+vco1: osc saw 220
+vco2: osc square 221  # Slight detune for richness
+lfo: osc sine 5
+env: envelope 0.05 0.3
+vcf: filter 2000 0.5
+vca: vca 1.0
+
+# Mix oscillators into filter
+# (Note: proper mixing would need a mixer module)
+vcf.audio <- vco1.saw
+
+# Envelope controls filter cutoff
+# Starts at 4000 Hz, sweeps down to 500 Hz
+vcf.cutoff <- env.out * 3500 + 500
+
+# Filter output to VCA
+vca.audio <- vcf.lp
+
+# Note: VCA CV defaults to 1.0 (full amplitude)
+# Could add another envelope here: vca.cv <- env2.out
+
+out <- vca.out

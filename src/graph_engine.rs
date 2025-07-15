@@ -5,28 +5,30 @@ use crate::graph_modules::{GraphEnvelope, GraphFilter, GraphOscillator, GraphVca
 use crate::modules::ModuleType;
 use crate::parser::{parse_line, Command};
 use anyhow::{anyhow, Result};
-// use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-// use std::sync::{Arc, Mutex};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::sync::{Arc, Mutex};
 
 /// Audio engine using the new graph executor
 pub struct GraphEngine {
-    graph: GraphExecutor,
+    graph: Arc<Mutex<GraphExecutor>>,
     stream: Option<cpal::Stream>,
     is_running: bool,
     #[allow(dead_code)]
     sample_rate: f32,
-    // Store output module name for audio routing
+    // Store output module and port for audio routing
     output_module: Option<String>,
+    output_port: Option<String>,
 }
 
 impl GraphEngine {
     pub fn new() -> Self {
         Self {
-            graph: GraphExecutor::new(),
+            graph: Arc::new(Mutex::new(GraphExecutor::new())),
             stream: None,
             is_running: false,
             sample_rate: 44100.0,
             output_module: None,
+            output_port: None,
         }
     }
 
@@ -39,7 +41,9 @@ impl GraphEngine {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            self.process_line(line)?;
+            if let Err(e) = self.process_line(line) {
+                return Err(anyhow!("Error on line '{}': {}", line, e));
+            }
         }
 
         Ok(())
@@ -64,12 +68,22 @@ impl GraphEngine {
                 Ok(format!("Created module: {name}"))
             }
             Command::Connect { from, to } => {
-                // Handle old-style connections by converting to new syntax
+                // Handle connections
                 if to == "out" {
-                    self.output_module = Some(from.clone());
-                    Ok(format!("Connected {from} to output"))
+                    // Parse the from string to get module and port
+                    let parts: Vec<&str> = from.split('.').collect();
+                    if parts.len() == 2 {
+                        self.output_module = Some(parts[0].to_string());
+                        self.output_port = Some(parts[1].to_string());
+                        Ok(format!("Connected {from} to output"))
+                    } else {
+                        Err(anyhow!("Output source must be in format module.port"))
+                    }
+                } else if to.contains('.') {
+                    // New style: dest already has port (e.g., vca.audio <- vco.sine)
+                    self.parse_connection(&to, &from)
                 } else {
-                    // Convert old syntax to new - assume connecting to audio input
+                    // Old style: assume connecting to audio input (e.g., vcf <- vco)
                     self.parse_connection(&format!("{to}.audio"), &from)
                 }
             }
@@ -104,6 +118,7 @@ impl GraphEngine {
             let parts: Vec<&str> = source_expr.split('.').collect();
             if parts.len() == 2 {
                 self.output_module = Some(parts[0].to_string());
+                self.output_port = Some(parts[1].to_string());
                 return Ok(format!("Connected {source_expr} to audio output"));
             }
             return Err(anyhow!("Output must be connected to a module.port"));
@@ -119,7 +134,7 @@ impl GraphEngine {
         // Parse source expression (could be complex)
         let expr = Self::parse_connection_expr(source_expr)?;
 
-        self.graph.add_connection(Connection {
+        self.graph.lock().unwrap().add_connection(Connection {
             to_module: dest_module.to_string(),
             to_port: dest_port.to_string(),
             expression: expr,
@@ -166,12 +181,7 @@ impl GraphEngine {
         Err(anyhow!("Invalid connection expression: {}", expr))
     }
 
-    fn create_module(
-        &mut self,
-        name: String,
-        module_type: ModuleType,
-        params: &[f32],
-    ) -> Result<()> {
+    fn create_module(&self, name: String, module_type: ModuleType, params: &[f32]) -> Result<()> {
         let module: Box<dyn crate::graph::GraphModule> = match module_type {
             ModuleType::Oscillator => {
                 // Handle waveform encoding (negative number means waveform type)
@@ -201,22 +211,75 @@ impl GraphEngine {
             _ => return Err(anyhow!("Module type {:?} not yet implemented", module_type)),
         };
 
-        self.graph.add_module(name, module);
+        self.graph.lock().unwrap().add_module(name, module);
         Ok(())
     }
 
     /// Start audio processing
-    #[allow(clippy::unnecessary_wraps)] // Will return errors when audio is implemented
     pub fn start(&mut self) -> Result<()> {
         if self.is_running {
             return Ok(());
         }
 
-        // For now, just mark as running without actual audio
-        // TODO: Implement proper thread-safe audio callback
-        self.is_running = true;
-        println!("Audio engine started (note: audio output not yet implemented for graph mode)");
+        // Get the default audio host
+        let host = cpal::default_host();
 
+        // Get the default output device
+        let device = host
+            .default_output_device()
+            .ok_or_else(|| anyhow!("No audio output device available"))?;
+
+        // Get the default output config
+        let config = device.default_output_config()?;
+
+        // Clone the sample rate for use in the closure
+        #[allow(clippy::cast_precision_loss)]
+        let sample_rate = config.sample_rate().0 as f32;
+        self.sample_rate = sample_rate;
+
+        // Clone the graph reference for the audio thread
+        let graph_clone = Arc::clone(&self.graph);
+
+        // Store output module and port for audio routing
+        let output_module = self.output_module.clone();
+        let output_port = self.output_port.clone().unwrap_or_else(|| "output".to_string());
+
+        // Build the output stream
+        let stream = match config.sample_format() {
+            cpal::SampleFormat::F32 => Self::build_stream::<f32>(
+                &device,
+                &config.into(),
+                graph_clone,
+                output_module,
+                output_port,
+            )?,
+            cpal::SampleFormat::I16 => Self::build_stream::<i16>(
+                &device,
+                &config.into(),
+                graph_clone,
+                output_module,
+                output_port,
+            )?,
+            cpal::SampleFormat::U16 => Self::build_stream::<u16>(
+                &device,
+                &config.into(),
+                graph_clone,
+                output_module,
+                output_port,
+            )?,
+            _ => {
+                return Err(anyhow!("Unsupported sample format"));
+            }
+        };
+
+        // Start the stream
+        stream.play()?;
+
+        // Store the stream
+        self.stream = Some(stream);
+        self.is_running = true;
+
+        println!("Audio engine started at {sample_rate} Hz");
         Ok(())
     }
 
@@ -231,22 +294,77 @@ impl GraphEngine {
     /// Clear the patch
     pub fn clear_patch(&mut self) {
         self.stop();
-        self.graph = GraphExecutor::new();
+        *self.graph.lock().unwrap() = GraphExecutor::new();
         self.output_module = None;
+        self.output_port = None;
     }
 
     /// List all modules
     pub fn list_modules(&self) -> Vec<String> {
-        self.graph.list_modules()
+        self.graph.lock().unwrap().list_modules()
     }
 
     /// Inspect a module
     pub fn inspect_module(&self, name: &str) -> Option<ModuleInfo> {
-        self.graph.inspect_module(name)
+        self.graph.lock().unwrap().inspect_module(name)
     }
 
     /// Validate all connections
     pub fn validate_connections(&self) -> Vec<String> {
-        self.graph.validate_connections()
+        self.graph.lock().unwrap().validate_connections()
+    }
+
+    /// Build an audio stream for the given sample format
+    fn build_stream<T>(
+        device: &cpal::Device,
+        config: &cpal::StreamConfig,
+        graph: Arc<Mutex<GraphExecutor>>,
+        output_module: Option<String>,
+        output_port: String,
+    ) -> Result<cpal::Stream>
+    where
+        T: cpal::Sample + cpal::SizedSample + cpal::FromSample<f32>,
+    {
+        let channels = config.channels as usize;
+
+        let err_fn = |err| eprintln!("Audio stream error: {err}");
+
+        let stream = device.build_output_stream(
+            config,
+            move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+                // Fill with silence by default
+                for sample in data.iter_mut() {
+                    *sample = T::EQUILIBRIUM;
+                }
+
+                // Lock the graph for processing
+                if let Ok(mut graph) = graph.lock() {
+                    let samples_per_channel = data.len() / channels;
+
+                    // Process the graph
+                    graph.process(samples_per_channel);
+
+                    // Get output from the designated module
+                    if let Some(ref output_module) = output_module {
+                        if let Some(buffer) = graph.get_output(output_module, &output_port) {
+                            // Copy the output buffer to the audio stream
+                            for (i, frame) in data.chunks_mut(channels).enumerate() {
+                                if i < buffer.len() {
+                                    let value = buffer[i];
+                                    let sample = cpal::Sample::from_sample(value);
+                                    for channel_sample in frame.iter_mut() {
+                                        *channel_sample = sample;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            err_fn,
+            None, // No timeout
+        )?;
+
+        Ok(stream)
     }
 }

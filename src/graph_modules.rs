@@ -198,11 +198,17 @@ pub struct GraphFilter {
     resonance: f32,
     // Simple one-pole lowpass state
     state: f32,
+    sample_rate: f32,
 }
 
 impl GraphFilter {
     pub fn new(cutoff: f32, resonance: f32) -> Self {
-        Self { cutoff, resonance, state: 0.0 }
+        Self {
+            cutoff,
+            resonance,
+            state: 0.0,
+            sample_rate: 44100.0,
+        }
     }
 }
 
@@ -258,7 +264,7 @@ impl GraphModule for GraphFilter {
             let freq = (self.cutoff + cutoff_mod).clamp(20.0, 20000.0);
 
             // Simple one-pole lowpass
-            let cutoff_normalized = (freq / 22050.0).min(0.99);
+            let cutoff_normalized = (freq / (self.sample_rate * 0.5)).min(0.99);
             self.state += cutoff_normalized * (input - self.state);
 
             lp_out[i] = self.state;
@@ -311,7 +317,7 @@ impl GraphEnvelope {
         Self {
             attack,
             decay,
-            phase: EnvelopePhase::Idle,
+            phase: EnvelopePhase::Attack, // Auto-trigger on creation
             phase_time: 0.0,
             current_value: 0.0,
             sample_rate: 44100.0,

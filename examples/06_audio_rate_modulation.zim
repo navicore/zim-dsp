@@ -1,0 +1,15 @@
+# Audio-rate modulation (Serge philosophy)
+# Using audio-rate oscillator as modulation source
+
+carrier: osc sine 440    # Carrier frequency
+modulator: osc sine 880  # Modulator at 2x carrier frequency
+vca: vca 1.0
+
+# Carrier to VCA audio input
+vca.audio <- carrier.sine
+
+# Audio-rate amplitude modulation
+# Creates complex timbres through AM synthesis
+vca.cv <- modulator.sine
+
+out <- vca.out
