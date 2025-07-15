@@ -1,0 +1,17 @@
+# Test file for REPL mode
+# Execute each line one by one with Enter
+
+# Create oscillator
+vco: osc sine 440
+
+# Connect to output  
+out <- vco.sine
+
+# Start audio
+start
+
+# Change frequency
+vco.freq <- 880
+
+# Stop audio
+stop
