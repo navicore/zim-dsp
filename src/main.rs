@@ -70,8 +70,16 @@ fn run_repl() -> Result<()> {
         io::Write::flush(&mut io::stdout())?;
 
         let mut input = String::new();
-        reader.read_line(&mut input)?;
+        match reader.read_line(&mut input) {
+            Ok(0) => break, // EOF
+            Ok(_) => {}
+            Err(e) => return Err(e.into()),
+        }
         let input = input.trim();
+
+        if input.is_empty() {
+            continue;
+        }
 
         match input {
             "quit" | "exit" => break,
@@ -83,6 +91,22 @@ fn run_repl() -> Result<()> {
             "stop" => {
                 engine.stop();
                 println!("Audio stopped");
+            }
+            "gate" | "g" => {
+                // Activate manual gate modules
+                if engine.activate_manual_gates() > 0 {
+                    println!("Manual gates activated");
+                } else {
+                    println!("No manual gate modules found");
+                }
+            }
+            "release" | "r" => {
+                // Release manual gate modules
+                if engine.release_manual_gates() > 0 {
+                    println!("Manual gates released");
+                } else {
+                    println!("No manual gate modules found");
+                }
             }
             "clear" => {
                 engine.clear_patch();
@@ -166,6 +190,8 @@ fn print_repl_help() {
     help      - Show this help
     start     - Start audio processing
     stop      - Stop audio processing
+    gate/g    - Turn on manual gates
+    release/r - Turn off manual gates
     clear     - Clear current patch
     list      - List all modules
     inspect   - Inspect a module's ports
@@ -177,10 +203,13 @@ Patch Syntax:
     vcf: filter moog            - Create filter
     env: envelope 0.01 0.1      - Create envelope
     vca: vca 1.0                - Create VCA
+    clock: lfo 0.5              - Create LFO (0.5 Hz)
+    gate: manual                - Create manual gate
     
 Connections:
     vcf.audio <- vco.sine       - Simple connection
     vca.cv <- env.output        - Control voltage
+    env.gate <- clock.gate      - Clock triggers envelope
     vcf.cutoff <- lfo.sine * 2000 + 1000  - Scaled/offset
     out <- vca.output           - Route to output"
     );

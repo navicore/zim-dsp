@@ -1,0 +1,21 @@
+# Manual gate version of amplitude control example
+# This tests whether the routing bug occurs with manual gate instead of LFO
+
+# Create a manual gate to trigger the envelope
+gate: manual
+
+vco: osc sine 440
+env: envelope 0.01 0.5  # 10ms attack, 500ms decay
+vca: vca 1.0
+
+# Gate the envelope with manual gate
+env.gate <- gate.gate
+
+# Audio path: oscillator -> VCA audio input
+vca.audio <- vco.sine
+
+# Control path: envelope -> VCA control voltage
+vca.cv <- env.out
+
+# Output
+out <- vca.out

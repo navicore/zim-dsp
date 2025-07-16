@@ -1,7 +1,9 @@
 //! Graph-based audio engine for the REPL
 
 use crate::graph::{Connection, ConnectionExpr, GraphExecutor, ModuleInfo};
-use crate::graph_modules::{GraphEnvelope, GraphFilter, GraphOscillator, GraphVca};
+use crate::graph_modules::{
+    GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphOscillator, GraphVca,
+};
 use crate::modules::ModuleType;
 use crate::parser::{parse_line, Command};
 use anyhow::{anyhow, Result};
@@ -208,6 +210,11 @@ impl GraphEngine {
                 let gain = params.first().copied().unwrap_or(1.0);
                 Box::new(GraphVca::new(gain))
             }
+            ModuleType::Lfo => {
+                let frequency = params.first().copied().unwrap_or(1.0);
+                Box::new(GraphLfo::new(frequency))
+            }
+            ModuleType::ManualGate => Box::new(GraphManualGate::new()),
             _ => return Err(anyhow!("Module type {:?} not yet implemented", module_type)),
         };
 
@@ -312,6 +319,16 @@ impl GraphEngine {
     /// Validate all connections
     pub fn validate_connections(&self) -> Vec<String> {
         self.graph.lock().unwrap().validate_connections()
+    }
+
+    /// Activate all manual gate modules
+    pub fn activate_manual_gates(&self) -> usize {
+        self.graph.lock().unwrap().activate_manual_gates()
+    }
+
+    /// Release all manual gate modules
+    pub fn release_manual_gates(&self) -> usize {
+        self.graph.lock().unwrap().release_manual_gates()
     }
 
     /// Build an audio stream for the given sample format

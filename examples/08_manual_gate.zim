@@ -1,0 +1,26 @@
+# Manual gate example - play notes with keyboard commands
+# Use 'g' or 'gate' to press the gate, 'r' or 'release' to release it
+
+# Create manual gate module
+gate: manual
+
+# Oscillator
+vco: osc sine 440
+
+# Envelope triggered by manual gate
+env: envelope 0.01 0.5  # 10ms attack, 500ms decay
+
+# VCA for amplitude control
+vca: vca 1.0
+
+# Connect manual gate to envelope
+env.gate <- gate.gate
+
+# Audio path: oscillator -> VCA audio input
+vca.audio <- vco.sine
+
+# Control path: envelope -> VCA control voltage
+vca.cv <- env.out
+
+# Output
+out <- vca.out
