@@ -1,0 +1,26 @@
+# LFO-triggered envelope example
+# The LFO provides a gate signal to trigger the envelope repeatedly
+
+# Create an LFO at 2 Hz (2 triggers per second)
+clock: lfo 2
+
+# Create oscillator
+vco: osc sine 440
+
+# Create envelope (50ms attack, 200ms decay)
+env: envelope 0.05 0.2
+
+# Create VCA
+vca: vca 1.0
+
+# Connect clock to envelope gate
+env.gate <- clock.gate
+
+# Connect oscillator to VCA audio input
+vca.audio <- vco.sine
+
+# Connect envelope to VCA control input
+vca.cv <- env.out
+
+# Connect VCA output to audio out
+out <- vca.out

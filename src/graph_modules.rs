@@ -24,6 +24,10 @@ impl GraphOscillator {
 }
 
 impl GraphModule for GraphOscillator {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn inputs(&self) -> Vec<PortDescriptor> {
         vec![
             PortDescriptor {
@@ -130,6 +134,10 @@ impl GraphVca {
 }
 
 impl GraphModule for GraphVca {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn inputs(&self) -> Vec<PortDescriptor> {
         vec![
             PortDescriptor {
@@ -139,8 +147,8 @@ impl GraphModule for GraphVca {
             },
             PortDescriptor {
                 name: "cv".to_string(),
-                default_value: 1.0,
-                description: "Control voltage input".to_string(),
+                default_value: 0.0,
+                description: "Control voltage input (0=closed, 1=open)".to_string(),
             },
             PortDescriptor {
                 name: "cv2".to_string(),
@@ -165,9 +173,11 @@ impl GraphModule for GraphVca {
 
         let out = outputs.get_mut("out").unwrap();
 
+
         for i in 0..sample_count {
+            // These will always use the buffer values since buffers are pre-initialized
             let audio_sample = if i < audio.len() { audio[i] } else { 0.0 };
-            let cv_value = if i < cv.len() { cv[i] } else { 1.0 };
+            let cv_value = if i < cv.len() { cv[i] } else { 0.0 };
             let cv2_mod = if i < cv2.len() { cv2[i] } else { 1.0 };
 
             out[i] = audio_sample * cv_value * cv2_mod * self.gain;
@@ -213,6 +223,10 @@ impl GraphFilter {
 }
 
 impl GraphModule for GraphFilter {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn inputs(&self) -> Vec<PortDescriptor> {
         vec![
             PortDescriptor {
@@ -295,6 +309,180 @@ impl GraphModule for GraphFilter {
     }
 }
 
+/// LFO (Low Frequency Oscillator) module for modulation and clock signals
+pub struct GraphLfo {
+    frequency: f32,
+    phase: f32,
+    sample_rate: f32,
+}
+
+impl GraphLfo {
+    pub fn new(frequency: f32) -> Self {
+        Self {
+            frequency,
+            phase: 0.0,
+            sample_rate: 44100.0,
+        }
+    }
+}
+
+impl GraphModule for GraphLfo {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![PortDescriptor {
+            name: "sync".to_string(),
+            default_value: 0.0,
+            description: "Sync/reset input".to_string(),
+        }]
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "sine".to_string(),
+                default_value: 0.0,
+                description: "Sine wave output (bipolar: -1 to 1)".to_string(),
+            },
+            PortDescriptor {
+                name: "square".to_string(),
+                default_value: 0.0,
+                description: "Square wave output (bipolar: -1 to 1)".to_string(),
+            },
+            PortDescriptor {
+                name: "gate".to_string(),
+                default_value: 0.0,
+                description: "Gate output (unipolar: 0 to 1)".to_string(),
+            },
+            PortDescriptor {
+                name: "ramp".to_string(),
+                default_value: 0.0,
+                description: "Ramp/saw output (unipolar: 0 to 1)".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let sync_input = inputs.get("sync").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        let [sine_out, square_out, gate_out, ramp_out] =
+            outputs.get_many_mut(["sine", "square", "gate", "ramp"]);
+        let sine_out = sine_out.unwrap();
+        let square_out = square_out.unwrap();
+        let gate_out = gate_out.unwrap();
+        let ramp_out = ramp_out.unwrap();
+
+        for i in 0..sample_count {
+            // Handle sync
+            if i < sync_input.len() && sync_input[i] > 0.0 && (i == 0 || sync_input[i - 1] <= 0.0) {
+                self.phase = 0.0;
+            }
+
+            // Generate waveforms
+            sine_out[i] = (self.phase * 2.0 * std::f32::consts::PI).sin();
+            square_out[i] = if self.phase < 0.5 { 1.0 } else { -1.0 };
+            gate_out[i] = if self.phase < 0.5 { 1.0 } else { 0.0 }; // Unipolar for gates
+            ramp_out[i] = self.phase; // 0 to 1 ramp
+
+            // Advance phase
+            self.phase += self.frequency / self.sample_rate;
+            if self.phase >= 1.0 {
+                self.phase -= 1.0;
+            }
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        match name {
+            "frequency" | "freq" => {
+                self.frequency = value;
+                Ok(())
+            }
+            _ => Err(anyhow!("Unknown parameter: {}", name)),
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        match name {
+            "frequency" | "freq" => Some(self.frequency),
+            _ => None,
+        }
+    }
+}
+
+/// Manual gate module - outputs gate signal based on keyboard input
+pub struct GraphManualGate {
+    gate_on: bool,
+}
+
+impl GraphManualGate {
+    pub fn new() -> Self {
+        Self { gate_on: false }
+    }
+    
+    pub fn set_gate(&mut self, on: bool) {
+        self.gate_on = on;
+    }
+}
+
+impl GraphModule for GraphManualGate {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![]  // No inputs
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "gate".to_string(),
+                default_value: 0.0,
+                description: "Gate output (0 or 1)".to_string(),
+            },
+            PortDescriptor {
+                name: "trig".to_string(),
+                default_value: 0.0,
+                description: "Trigger output (pulse on key press)".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, _inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let [gate_out, trig_out] = outputs.get_many_mut(["gate", "trig"]);
+        let gate_out = gate_out.unwrap();
+        let trig_out = trig_out.unwrap();
+        
+        let gate_value = if self.gate_on { 1.0 } else { 0.0 };
+        
+        for i in 0..sample_count {
+            gate_out[i] = gate_value;
+            // Trigger is just a copy of gate for now
+            trig_out[i] = gate_value;
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        match name {
+            "gate" => {
+                self.gate_on = value > 0.5;
+                Ok(())
+            }
+            _ => Err(anyhow!("Unknown parameter: {}", name)),
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        match name {
+            "gate" => Some(if self.gate_on { 1.0 } else { 0.0 }),
+            _ => None,
+        }
+    }
+}
+
 /// Envelope generator
 pub struct GraphEnvelope {
     attack: f32,
@@ -303,6 +491,7 @@ pub struct GraphEnvelope {
     phase_time: f32,
     current_value: f32,
     sample_rate: f32,
+    last_gate: f32,  // Track previous gate value for edge detection
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -317,15 +506,20 @@ impl GraphEnvelope {
         Self {
             attack,
             decay,
-            phase: EnvelopePhase::Attack, // Auto-trigger on creation
+            phase: EnvelopePhase::Idle, // Start idle, wait for gate
             phase_time: 0.0,
             current_value: 0.0,
             sample_rate: 44100.0,
+            last_gate: 0.0,
         }
     }
 }
 
 impl GraphModule for GraphEnvelope {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn inputs(&self) -> Vec<PortDescriptor> {
         vec![PortDescriptor {
             name: "gate".to_string(),
@@ -347,8 +541,13 @@ impl GraphModule for GraphEnvelope {
         let out = outputs.get_mut("out").unwrap();
 
         for i in 0..sample_count {
-            // Check for gate trigger
-            if i < gate.len() && gate[i] > 0.0 && (i == 0 || gate[i - 1] <= 0.0) {
+            let current_gate = if i < gate.len() { gate[i] } else { 0.0 };
+            
+            // Check for rising edge trigger
+            let prev_gate = if i == 0 { self.last_gate } else { gate[i - 1] };
+            
+            if current_gate > 0.0 && prev_gate <= 0.0 {
+                // Rising edge detected - trigger envelope
                 self.phase = EnvelopePhase::Attack;
                 self.phase_time = 0.0;
             }
@@ -387,6 +586,11 @@ impl GraphModule for GraphEnvelope {
 
             out[i] = self.current_value;
             self.phase_time += 1.0 / self.sample_rate;
+        }
+        
+        // Remember the last gate value for next process call
+        if sample_count > 0 && !gate.is_empty() {
+            self.last_gate = gate[sample_count - 1];
         }
     }
 

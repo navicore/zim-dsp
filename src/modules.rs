@@ -10,6 +10,8 @@ pub enum ModuleType {
     Vca,
     Mixer,
     Output,
+    Lfo,
+    ManualGate,
 }
 
 impl std::fmt::Display for ModuleType {
@@ -21,6 +23,8 @@ impl std::fmt::Display for ModuleType {
             Self::Vca => write!(f, "vca"),
             Self::Mixer => write!(f, "mix"),
             Self::Output => write!(f, "out"),
+            Self::Lfo => write!(f, "lfo"),
+            Self::ManualGate => write!(f, "gate"),
         }
     }
 }
@@ -34,6 +38,8 @@ pub fn parse_module_type(s: &str) -> Result<ModuleType> {
         "vca" => Ok(ModuleType::Vca),
         "mix" | "mixer" => Ok(ModuleType::Mixer),
         "out" | "output" => Ok(ModuleType::Output),
+        "lfo" => Ok(ModuleType::Lfo),
+        "gate" | "manual" => Ok(ModuleType::ManualGate),
         _ => Err(anyhow!("Unknown module type: {s}")),
     }
 }

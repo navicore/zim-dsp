@@ -96,6 +96,9 @@ pub trait GraphModule: Send {
 
     /// Get current parameter value
     fn get_param(&self, name: &str) -> Option<f32>;
+    
+    /// Allow downcasting to concrete types
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 /// Represents a connection expression with potential scaling/offset
@@ -308,6 +311,38 @@ impl GraphExecutor {
                 }
             }
         }
+    }
+
+    /// Activate all manual gate modules
+    pub fn activate_manual_gates(&mut self) -> usize {
+        use crate::graph_modules::GraphManualGate;
+        let mut count = 0;
+        
+        for module in self.modules.values_mut() {
+            // Try to downcast to GraphManualGate
+            if let Some(gate) = module.as_any_mut().downcast_mut::<GraphManualGate>() {
+                gate.set_gate(true);
+                count += 1;
+            }
+        }
+        
+        count
+    }
+
+    /// Release all manual gate modules
+    pub fn release_manual_gates(&mut self) -> usize {
+        use crate::graph_modules::GraphManualGate;
+        let mut count = 0;
+        
+        for module in self.modules.values_mut() {
+            // Try to downcast to GraphManualGate
+            if let Some(gate) = module.as_any_mut().downcast_mut::<GraphManualGate>() {
+                gate.set_gate(false);
+                count += 1;
+            }
+        }
+        
+        count
     }
 }
 

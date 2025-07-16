@@ -1,9 +1,15 @@
 # VCA (Voltage Controlled Amplifier) example
 # Shows how to control amplitude with an envelope
 
+# Create a slow LFO to trigger the envelope
+clock: lfo 0.5  # 0.5 Hz = trigger every 2 seconds
+
 vco: osc sine 440
 env: envelope 0.01 0.5  # 10ms attack, 500ms decay
 vca: vca 1.0
+
+# Gate the envelope with the LFO
+env.gate <- clock.gate
 
 # Audio path: oscillator -> VCA audio input
 vca.audio <- vco.sine
