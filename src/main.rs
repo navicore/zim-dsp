@@ -5,7 +5,8 @@
 #![allow(clippy::multiple_crate_versions)] // Dependencies have conflicting sub-dependencies
 
 use anyhow::Result;
-use std::io::{self, BufRead, BufReader};
+use rustyline::error::ReadlineError;
+use rustyline::{Config, EditMode, Editor};
 
 mod graph;
 mod graph_engine;
@@ -52,117 +53,153 @@ fn play_patch(patch_file: &str) -> Result<()> {
 
     println!("Playing... Press Enter to stop");
     let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+    std::io::stdin().read_line(&mut input)?;
 
     engine.stop();
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_repl() -> Result<()> {
     println!("Zim-DSP REPL - Type 'help' for commands, 'quit' to exit");
+    println!("Vi mode enabled: ESC for normal mode, 'i' for insert mode");
+
+    // Configure rustyline with Vi mode
+    let config = Config::builder()
+        .edit_mode(EditMode::Vi)
+        .history_ignore_space(true)
+        .max_history_size(1000)?
+        .build();
+
+    let mut rl = Editor::<(), _>::with_config(config)?;
+
+    // Load history if it exists
+    let history_path = dirs::home_dir().map(|mut path| {
+        path.push(".zim_dsp_history");
+        path
+    });
+
+    if let Some(ref path) = history_path {
+        let _ = rl.load_history(path);
+    }
 
     let mut engine = GraphEngine::new();
-    let stdin = io::stdin();
-    let mut reader = BufReader::new(stdin);
 
     loop {
-        print!("> ");
-        io::Write::flush(&mut io::stdout())?;
+        let readline = rl.readline("> ");
 
-        let mut input = String::new();
-        match reader.read_line(&mut input) {
-            Ok(0) => break, // EOF
-            Ok(_) => {}
-            Err(e) => return Err(e.into()),
-        }
-        let input = input.trim();
+        match readline {
+            Ok(line) => {
+                let input = line.trim();
 
-        if input.is_empty() {
-            continue;
-        }
-
-        match input {
-            "quit" | "exit" => break,
-            "help" => print_repl_help(),
-            "start" => {
-                engine.start()?;
-                println!("Audio started");
-            }
-            "stop" => {
-                engine.stop();
-                println!("Audio stopped");
-            }
-            "gate" | "g" => {
-                // Activate manual gate modules
-                if engine.activate_manual_gates() > 0 {
-                    println!("Manual gates activated");
-                } else {
-                    println!("No manual gate modules found");
+                if input.is_empty() {
+                    continue;
                 }
-            }
-            "release" | "r" => {
-                // Release manual gate modules
-                if engine.release_manual_gates() > 0 {
-                    println!("Manual gates released");
-                } else {
-                    println!("No manual gate modules found");
-                }
-            }
-            "clear" => {
-                engine.clear_patch();
-                println!("Patch cleared");
-            }
-            "list" => {
-                let modules = engine.list_modules();
-                if modules.is_empty() {
-                    println!("No modules loaded");
-                } else {
-                    println!("Modules:");
-                    for module in modules {
-                        println!("  - {module}");
+
+                // Add to history
+                let _ = rl.add_history_entry(&line);
+
+                match input {
+                    "quit" | "exit" => break,
+                    "help" => print_repl_help(),
+                    "start" => {
+                        engine.start()?;
+                        println!("Audio started");
                     }
-                }
-            }
-            "validate" => {
-                let errors = engine.validate_connections();
-                if errors.is_empty() {
-                    println!("✓ All connections are valid");
-                } else {
-                    println!("Connection errors:");
-                    for error in errors {
-                        println!("  - {error}");
+                    "stop" => {
+                        engine.stop();
+                        println!("Audio stopped");
                     }
-                }
-            }
-            _ => {
-                // Check for inspect command
-                if let Some(module_name) = input.strip_prefix("inspect ") {
-                    let module_name = module_name.trim();
-                    if let Some(info) = engine.inspect_module(module_name) {
-                        println!("Module: {}", info.name);
-                        println!("  Inputs:");
-                        for input in &info.inputs {
-                            println!(
-                                "    - {} (default: {}): {}",
-                                input.name, input.default_value, input.description
-                            );
+                    "gate" | "g" => {
+                        // Activate manual gate modules
+                        if engine.activate_manual_gates() > 0 {
+                            println!("Manual gates activated");
+                        } else {
+                            println!("No manual gate modules found");
                         }
-                        println!("  Outputs:");
-                        for output in &info.outputs {
-                            println!("    - {}: {}", output.name, output.description);
-                        }
-                    } else {
-                        eprintln!("Module '{module_name}' not found");
                     }
-                } else {
-                    // Try to parse as patch command
-                    match engine.process_line(input) {
-                        Ok(msg) => println!("{msg}"),
-                        Err(e) => eprintln!("Error: {e}"),
+                    "release" | "r" => {
+                        // Release manual gate modules
+                        if engine.release_manual_gates() > 0 {
+                            println!("Manual gates released");
+                        } else {
+                            println!("No manual gate modules found");
+                        }
+                    }
+                    "clear" => {
+                        engine.clear_patch();
+                        println!("Patch cleared");
+                    }
+                    "list" => {
+                        let modules = engine.list_modules();
+                        if modules.is_empty() {
+                            println!("No modules loaded");
+                        } else {
+                            println!("Modules:");
+                            for module in modules {
+                                println!("  - {module}");
+                            }
+                        }
+                    }
+                    "validate" => {
+                        let errors = engine.validate_connections();
+                        if errors.is_empty() {
+                            println!("✓ All connections are valid");
+                        } else {
+                            println!("Connection errors:");
+                            for error in errors {
+                                println!("  - {error}");
+                            }
+                        }
+                    }
+                    _ => {
+                        // Check for inspect command
+                        if let Some(module_name) = input.strip_prefix("inspect ") {
+                            let module_name = module_name.trim();
+                            if let Some(info) = engine.inspect_module(module_name) {
+                                println!("Module: {}", info.name);
+                                println!("  Inputs:");
+                                for input in &info.inputs {
+                                    println!(
+                                        "    - {} (default: {}): {}",
+                                        input.name, input.default_value, input.description
+                                    );
+                                }
+                                println!("  Outputs:");
+                                for output in &info.outputs {
+                                    println!("    - {}: {}", output.name, output.description);
+                                }
+                            } else {
+                                eprintln!("Module '{module_name}' not found");
+                            }
+                        } else {
+                            // Try to parse as patch command
+                            match engine.process_line(input) {
+                                Ok(msg) => println!("{msg}"),
+                                Err(e) => eprintln!("Error: {e}"),
+                            }
+                        }
                     }
                 }
             }
+            Err(ReadlineError::Interrupted) => {
+                println!("CTRL-C");
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("CTRL-D");
+                break;
+            }
+            Err(err) => {
+                println!("Error: {err:?}");
+                break;
+            }
         }
+    }
+
+    // Save history
+    if let Some(ref path) = history_path {
+        let _ = rl.save_history(path);
     }
 
     Ok(())
