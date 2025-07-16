@@ -21,6 +21,8 @@ path = "src/main.rs"
 fundsp = { version = "0.18", default-features = false, features = ["std"] }
 cpal = "0.15"
 anyhow = "1.0"
+rustyline = "14.0"
+dirs = "5.0"
 
 [[example]]
 name = "graph_test"

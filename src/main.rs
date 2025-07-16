@@ -5,7 +5,8 @@
 #![allow(clippy::multiple_crate_versions)] // Dependencies have conflicting sub-dependencies
 
 use anyhow::Result;
-use std::io::{self, BufRead, BufReader};
+use rustyline::error::ReadlineError;
+use rustyline::{Config, EditMode, Editor};
 
 mod graph;
 mod graph_engine;
@@ -52,7 +53,7 @@ fn play_patch(patch_file: &str) -> Result<()> {
 
     println!("Playing... Press Enter to stop");
     let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+    std::io::stdin().read_line(&mut input)?;
 
     engine.stop();
     Ok(())
@@ -60,26 +61,43 @@ fn play_patch(patch_file: &str) -> Result<()> {
 
 fn run_repl() -> Result<()> {
     println!("Zim-DSP REPL - Type 'help' for commands, 'quit' to exit");
+    println!("Vi mode enabled: ESC for normal mode, 'i' for insert mode");
+
+    // Configure rustyline with Vi mode
+    let config = Config::builder()
+        .edit_mode(EditMode::Vi)
+        .history_ignore_space(true)
+        .max_history_size(1000)?
+        .build();
+
+    let mut rl = Editor::<(), _>::with_config(config)?;
+    
+    // Load history if it exists
+    let history_path = dirs::home_dir()
+        .map(|mut path| {
+            path.push(".zim_dsp_history");
+            path
+        });
+    
+    if let Some(ref path) = history_path {
+        let _ = rl.load_history(path);
+    }
 
     let mut engine = GraphEngine::new();
-    let stdin = io::stdin();
-    let mut reader = BufReader::new(stdin);
 
     loop {
-        print!("> ");
-        io::Write::flush(&mut io::stdout())?;
-
-        let mut input = String::new();
-        match reader.read_line(&mut input) {
-            Ok(0) => break, // EOF
-            Ok(_) => {}
-            Err(e) => return Err(e.into()),
-        }
-        let input = input.trim();
-
-        if input.is_empty() {
-            continue;
-        }
+        let readline = rl.readline("> ");
+        
+        match readline {
+            Ok(line) => {
+                let input = line.trim();
+                
+                if input.is_empty() {
+                    continue;
+                }
+                
+                // Add to history
+                let _ = rl.add_history_entry(&line);
 
         match input {
             "quit" | "exit" => break,
@@ -163,6 +181,25 @@ fn run_repl() -> Result<()> {
                 }
             }
         }
+            }
+            Err(ReadlineError::Interrupted) => {
+                println!("CTRL-C");
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("CTRL-D");
+                break;
+            }
+            Err(err) => {
+                println!("Error: {:?}", err);
+                break;
+            }
+        }
+    }
+
+    // Save history
+    if let Some(ref path) = history_path {
+        let _ = rl.save_history(path);
     }
 
     Ok(())
