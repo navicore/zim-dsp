@@ -173,7 +173,6 @@ impl GraphModule for GraphVca {
 
         let out = outputs.get_mut("out").unwrap();
 
-
         for i in 0..sample_count {
             // These will always use the buffer values since buffers are pre-initialized
             let audio_sample = if i < audio.len() { audio[i] } else { 0.0 };
@@ -421,9 +420,15 @@ impl GraphManualGate {
     pub fn new() -> Self {
         Self { gate_on: false }
     }
-    
+
     pub fn set_gate(&mut self, on: bool) {
         self.gate_on = on;
+    }
+}
+
+impl Default for GraphManualGate {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -433,7 +438,7 @@ impl GraphModule for GraphManualGate {
     }
 
     fn inputs(&self) -> Vec<PortDescriptor> {
-        vec![]  // No inputs
+        vec![] // No inputs
     }
 
     fn outputs(&self) -> Vec<PortDescriptor> {
@@ -455,9 +460,9 @@ impl GraphModule for GraphManualGate {
         let [gate_out, trig_out] = outputs.get_many_mut(["gate", "trig"]);
         let gate_out = gate_out.unwrap();
         let trig_out = trig_out.unwrap();
-        
+
         let gate_value = if self.gate_on { 1.0 } else { 0.0 };
-        
+
         for i in 0..sample_count {
             gate_out[i] = gate_value;
             // Trigger is just a copy of gate for now
@@ -491,7 +496,7 @@ pub struct GraphEnvelope {
     phase_time: f32,
     current_value: f32,
     sample_rate: f32,
-    last_gate: f32,  // Track previous gate value for edge detection
+    last_gate: f32, // Track previous gate value for edge detection
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -542,10 +547,10 @@ impl GraphModule for GraphEnvelope {
 
         for i in 0..sample_count {
             let current_gate = if i < gate.len() { gate[i] } else { 0.0 };
-            
+
             // Check for rising edge trigger
             let prev_gate = if i == 0 { self.last_gate } else { gate[i - 1] };
-            
+
             if current_gate > 0.0 && prev_gate <= 0.0 {
                 // Rising edge detected - trigger envelope
                 self.phase = EnvelopePhase::Attack;
@@ -587,7 +592,7 @@ impl GraphModule for GraphEnvelope {
             out[i] = self.current_value;
             self.phase_time += 1.0 / self.sample_rate;
         }
-        
+
         // Remember the last gate value for next process call
         if sample_count > 0 && !gate.is_empty() {
             self.last_gate = gate[sample_count - 1];

@@ -1,7 +1,9 @@
 //! Graph-based audio engine for the REPL
 
 use crate::graph::{Connection, ConnectionExpr, GraphExecutor, ModuleInfo};
-use crate::graph_modules::{GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphOscillator, GraphVca};
+use crate::graph_modules::{
+    GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphOscillator, GraphVca,
+};
 use crate::modules::ModuleType;
 use crate::parser::{parse_line, Command};
 use anyhow::{anyhow, Result};
@@ -212,9 +214,7 @@ impl GraphEngine {
                 let frequency = params.first().copied().unwrap_or(1.0);
                 Box::new(GraphLfo::new(frequency))
             }
-            ModuleType::ManualGate => {
-                Box::new(GraphManualGate::new())
-            }
+            ModuleType::ManualGate => Box::new(GraphManualGate::new()),
             _ => return Err(anyhow!("Module type {:?} not yet implemented", module_type)),
         };
 
@@ -322,18 +322,13 @@ impl GraphEngine {
     }
 
     /// Activate all manual gate modules
-    pub fn activate_manual_gates(&mut self) -> usize {
+    pub fn activate_manual_gates(&self) -> usize {
         self.graph.lock().unwrap().activate_manual_gates()
     }
 
     /// Release all manual gate modules
-    pub fn release_manual_gates(&mut self) -> usize {
+    pub fn release_manual_gates(&self) -> usize {
         self.graph.lock().unwrap().release_manual_gates()
-    }
-
-    /// Parse a line for the engine (exposed for REPL use)
-    pub fn parse_line(&mut self, line: &str) -> Result<()> {
-        self.process_line(line).map(|_| ())
     }
 
     /// Build an audio stream for the given sample format

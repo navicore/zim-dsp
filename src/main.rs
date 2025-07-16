@@ -72,7 +72,7 @@ fn run_repl() -> Result<()> {
         let mut input = String::new();
         match reader.read_line(&mut input) {
             Ok(0) => break, // EOF
-            Ok(_) => {},
+            Ok(_) => {}
             Err(e) => return Err(e.into()),
         }
         let input = input.trim();
