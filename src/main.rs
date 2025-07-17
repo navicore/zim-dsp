@@ -242,12 +242,17 @@ Patch Syntax:
     vca: vca 1.0                - Create VCA
     clock: lfo 0.5              - Create LFO (0.5 Hz)
     gate: manual                - Create manual gate
+    noise: noise                - Create noise generator
+    mix: mixer                  - Create 4-input mono mixer
+    mix: mixer 3                - Create 3-input mono mixer
     
 Connections:
     vcf.audio <- vco.sine       - Simple connection
     vca.cv <- env.output        - Control voltage
     env.gate <- clock.gate      - Clock triggers envelope
     vcf.cutoff <- lfo.sine * 2000 + 1000  - Scaled/offset
-    out <- vca.output           - Route to output"
+    out <- vca.out              - Mono to stereo output
+    out.left <- vca1.out        - Left channel only
+    out.right <- vca2.out       - Right channel only"
     );
 }

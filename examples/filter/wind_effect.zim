@@ -1,0 +1,21 @@
+# Wind effect using filtered pink noise
+
+noise: noise
+lfo: lfo 0.2  # Slow modulation
+
+# Filter the pink noise
+vcf: filter
+vcf.audio <- noise.pink
+
+# Modulate filter cutoff for wind effect
+# Note: We need expression support for this to work properly
+# For now, just set a fixed cutoff
+vcf.cutoff <- 800
+vcf.res <- 0.5
+
+# Output with reduced volume
+vca: vca 0.4
+vca.audio <- vcf.lp
+vca.cv <- 1.0  # Always on for now
+
+out <- vca.out

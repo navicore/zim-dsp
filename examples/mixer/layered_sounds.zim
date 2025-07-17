@@ -1,0 +1,45 @@
+# Layered sounds using mixer
+# Mix multiple sound sources with different envelopes
+
+# Two oscillators at different frequencies
+vco1: osc sine 220   # Low
+vco2: osc sine 440   # High
+
+# Noise for texture
+noise: noise
+
+# Clock to trigger everything
+clock: lfo 1
+
+# Different envelopes for each source
+env1: envelope 0.05 0.8   # Slow attack, long decay
+env2: envelope 0.001 0.3  # Fast attack, medium decay  
+env3: envelope 0.001 0.1  # Fast attack, short decay
+
+# VCAs for each source
+vca1: vca 0.5
+vca2: vca 0.3
+vca3: vca 0.2
+
+# Trigger all envelopes
+env1.gate <- clock.gate
+env2.gate <- clock.gate
+env3.gate <- clock.gate
+
+# Shape each source
+vca1.audio <- vco1.sine
+vca1.cv <- env1.out
+
+vca2.audio <- vco2.sine
+vca2.cv <- env2.out
+
+vca3.audio <- noise.white
+vca3.cv <- env3.out
+
+# Mix all three
+mix: mixer
+mix.in1 <- vca1.out
+mix.in2 <- vca2.out
+mix.in3 <- vca3.out
+
+out <- mix.out

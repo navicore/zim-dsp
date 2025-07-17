@@ -110,7 +110,7 @@ impl GraphModule for GraphOscillator {
                 self.frequency = value;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 
@@ -189,7 +189,7 @@ impl GraphModule for GraphVca {
                 self.gain = value;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 
@@ -295,7 +295,7 @@ impl GraphModule for GraphFilter {
                 self.resonance = value;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 
@@ -399,7 +399,7 @@ impl GraphModule for GraphLfo {
                 self.frequency = value;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 
@@ -476,7 +476,7 @@ impl GraphModule for GraphManualGate {
                 self.gate_on = value > 0.5;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 
@@ -484,6 +484,407 @@ impl GraphModule for GraphManualGate {
         match name {
             "gate" => Some(if self.gate_on { 1.0 } else { 0.0 }),
             _ => None,
+        }
+    }
+}
+
+/// Stereo output module - handles mono to stereo normalization
+pub struct GraphStereoOutput {
+    left_connected: bool,
+    right_connected: bool,
+}
+
+impl GraphStereoOutput {
+    pub fn new() -> Self {
+        Self {
+            left_connected: false,
+            right_connected: false,
+        }
+    }
+
+    pub fn set_left_connected(&mut self, connected: bool) {
+        self.left_connected = connected;
+    }
+
+    pub fn set_right_connected(&mut self, connected: bool) {
+        self.right_connected = connected;
+    }
+}
+
+impl Default for GraphStereoOutput {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphModule for GraphStereoOutput {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "left".to_string(),
+                default_value: 0.0,
+                description: "Left channel input".to_string(),
+            },
+            PortDescriptor {
+                name: "right".to_string(),
+                default_value: 0.0,
+                description: "Right channel input".to_string(),
+            },
+            PortDescriptor {
+                name: "mono".to_string(),
+                default_value: 0.0,
+                description: "Mono input (routed to both channels)".to_string(),
+            },
+        ]
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "left".to_string(),
+                default_value: 0.0,
+                description: "Left channel output".to_string(),
+            },
+            PortDescriptor {
+                name: "right".to_string(),
+                default_value: 0.0,
+                description: "Right channel output".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let left_in = inputs.get("left").map(|b| b.as_slice()).unwrap_or(&[]);
+        let right_in = inputs.get("right").map(|b| b.as_slice()).unwrap_or(&[]);
+        let mono_in = inputs.get("mono").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        let [left_out, right_out] = outputs.get_many_mut(["left", "right"]);
+        let left_out = left_out.unwrap();
+        let right_out = right_out.unwrap();
+
+        for i in 0..sample_count {
+            // Check if mono input is connected
+            let mono_sample = if i < mono_in.len() { mono_in[i] } else { 0.0 };
+
+            // Get stereo inputs
+            let left_sample = if i < left_in.len() { left_in[i] } else { 0.0 };
+            let right_sample = if i < right_in.len() { right_in[i] } else { 0.0 };
+
+            // If mono is connected, it overrides stereo inputs
+            if mono_sample != 0.0 || (!self.left_connected && !self.right_connected) {
+                left_out[i] = mono_sample;
+                right_out[i] = mono_sample;
+            } else {
+                // Handle stereo with normalization
+                left_out[i] = left_sample;
+
+                // If only left is connected, normalize to right
+                if self.left_connected && !self.right_connected {
+                    right_out[i] = left_sample;
+                } else {
+                    right_out[i] = right_sample;
+                }
+            }
+        }
+    }
+
+    fn set_param(&mut self, name: &str, _value: f32) -> Result<()> {
+        Err(anyhow!("Unknown parameter: {name}"))
+    }
+
+    fn get_param(&self, _name: &str) -> Option<f32> {
+        None
+    }
+}
+
+/// Noise generator with multiple noise colors
+pub struct GraphNoiseGen {
+    // Random number generator state
+    rng_state: u32,
+    // Pink noise state (Paul Kellet's method)
+    pink_state: [f32; 7],
+    // Brown noise state
+    brown_state: f32,
+}
+
+impl GraphNoiseGen {
+    pub fn new() -> Self {
+        Self {
+            rng_state: 12345, // Seed
+            pink_state: [0.0; 7],
+            brown_state: 0.0,
+        }
+    }
+
+    // Linear congruential generator for white noise
+    fn next_random(&mut self) -> f32 {
+        self.rng_state = self.rng_state.wrapping_mul(1664525).wrapping_add(1013904223);
+        // Convert to float in range -1 to 1
+        (self.rng_state as i32 as f32) / (i32::MAX as f32)
+    }
+
+    // Generate pink noise using Paul Kellet's method
+    #[allow(clippy::excessive_precision)]
+    fn generate_pink(&mut self) -> f32 {
+        let white = self.next_random();
+
+        // Update the state variables
+        self.pink_state[0] = 0.99886 * self.pink_state[0] + white * 0.0555179;
+        self.pink_state[1] = 0.99332 * self.pink_state[1] + white * 0.0750759;
+        self.pink_state[2] = 0.96900 * self.pink_state[2] + white * 0.1538520;
+        self.pink_state[3] = 0.86650 * self.pink_state[3] + white * 0.3104856;
+        self.pink_state[4] = 0.55000 * self.pink_state[4] + white * 0.5329522;
+        self.pink_state[5] = -0.7616 * self.pink_state[5] + white * 0.0168980;
+
+        let pink = self.pink_state[0]
+            + self.pink_state[1]
+            + self.pink_state[2]
+            + self.pink_state[3]
+            + self.pink_state[4]
+            + self.pink_state[5]
+            + self.pink_state[6]
+            + white * 0.5362;
+
+        self.pink_state[6] = white * 0.115926;
+
+        // Compensate for gain
+        pink * 0.11
+    }
+
+    // Generate brown noise (red noise) by integrating white noise
+    fn generate_brown(&mut self) -> f32 {
+        let white = self.next_random();
+        self.brown_state += white * 0.02; // Small step size
+
+        // Prevent runaway - soft clip
+        if self.brown_state > 1.0 {
+            self.brown_state = 1.0 - (self.brown_state - 1.0) * 0.5;
+        } else if self.brown_state < -1.0 {
+            self.brown_state = -1.0 - (self.brown_state + 1.0) * 0.5;
+        }
+
+        self.brown_state
+    }
+}
+
+impl Default for GraphNoiseGen {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphModule for GraphNoiseGen {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![] // No inputs - noise is a source
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "white".to_string(),
+                default_value: 0.0,
+                description: "White noise output (flat spectrum)".to_string(),
+            },
+            PortDescriptor {
+                name: "pink".to_string(),
+                default_value: 0.0,
+                description: "Pink noise output (-3dB/octave)".to_string(),
+            },
+            PortDescriptor {
+                name: "brown".to_string(),
+                default_value: 0.0,
+                description: "Brown/red noise output (-6dB/octave)".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, _inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let [white_out, pink_out, brown_out] = outputs.get_many_mut(["white", "pink", "brown"]);
+        let white_out = white_out.unwrap();
+        let pink_out = pink_out.unwrap();
+        let brown_out = brown_out.unwrap();
+
+        for i in 0..sample_count {
+            // Generate white noise
+            let white = self.next_random();
+            white_out[i] = white;
+
+            // Generate pink noise
+            pink_out[i] = self.generate_pink();
+
+            // Generate brown noise
+            brown_out[i] = self.generate_brown();
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        match name {
+            "seed" => {
+                self.rng_state = value as u32;
+                Ok(())
+            }
+            _ => Err(anyhow!("Unknown parameter: {name}")),
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        match name {
+            "seed" => Some(self.rng_state as f32),
+            _ => None,
+        }
+    }
+}
+
+/// Mono mixer module - combines multiple audio sources
+pub struct GraphMonoMixer {
+    input_count: usize,
+    levels: Vec<f32>, // Individual input levels
+    master_level: f32,
+}
+
+impl GraphMonoMixer {
+    pub fn new(input_count: usize) -> Self {
+        Self {
+            input_count,
+            levels: vec![1.0; input_count], // Unity gain by default
+            master_level: 1.0,
+        }
+    }
+
+    pub fn new_4input() -> Self {
+        Self::new(4)
+    }
+}
+
+impl Default for GraphMonoMixer {
+    fn default() -> Self {
+        Self::new_4input()
+    }
+}
+
+impl GraphModule for GraphMonoMixer {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        let mut inputs = Vec::new();
+
+        // Add numbered inputs
+        for i in 1..=self.input_count {
+            inputs.push(PortDescriptor {
+                name: format!("in{i}"),
+                default_value: 0.0,
+                description: format!("Audio input {i}"),
+            });
+        }
+
+        // Add level CV inputs
+        for i in 1..=self.input_count {
+            inputs.push(PortDescriptor {
+                name: format!("level{i}"),
+                default_value: 1.0,
+                description: format!("Level control for input {i}"),
+            });
+        }
+
+        // Master level CV
+        inputs.push(PortDescriptor {
+            name: "master".to_string(),
+            default_value: 1.0,
+            description: "Master level control".to_string(),
+        });
+
+        inputs
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![PortDescriptor {
+            name: "out".to_string(),
+            default_value: 0.0,
+            description: "Mixed audio output".to_string(),
+        }]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let master_cv = inputs.get("master").map(|b| b.as_slice()).unwrap_or(&[]);
+        let out = outputs.get_mut("out").unwrap();
+
+        // Get all input buffers
+        let mut input_buffers = Vec::new();
+        let mut level_buffers = Vec::new();
+
+        for i in 1..=self.input_count {
+            let input = inputs.get(&format!("in{i}")).map(|b| b.as_slice()).unwrap_or(&[]);
+            let level = inputs.get(&format!("level{i}")).map(|b| b.as_slice()).unwrap_or(&[]);
+            input_buffers.push(input);
+            level_buffers.push(level);
+        }
+
+        // Mix all inputs
+        for i in 0..sample_count {
+            let mut mixed_sample = 0.0;
+
+            // Sum all inputs with their levels
+            for (input_idx, (input_buf, level_buf)) in
+                input_buffers.iter().zip(level_buffers.iter()).enumerate()
+            {
+                let input_sample = if i < input_buf.len() { input_buf[i] } else { 0.0 };
+                let level_sample =
+                    if i < level_buf.len() { level_buf[i] } else { self.levels[input_idx] };
+
+                mixed_sample += input_sample * level_sample;
+            }
+
+            // Apply master level
+            let master_sample = if i < master_cv.len() { master_cv[i] } else { self.master_level };
+            out[i] = mixed_sample * master_sample;
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        if name == "master" {
+            self.master_level = value;
+            Ok(())
+        } else if let Some(stripped) = name.strip_prefix("level") {
+            if let Ok(index) = stripped.parse::<usize>() {
+                if index > 0 && index <= self.input_count {
+                    self.levels[index - 1] = value;
+                    Ok(())
+                } else {
+                    Err(anyhow!("Invalid level index: {index}"))
+                }
+            } else {
+                Err(anyhow!("Invalid level parameter: {name}"))
+            }
+        } else {
+            Err(anyhow!("Unknown parameter: {name}"))
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        if name == "master" {
+            Some(self.master_level)
+        } else if let Some(stripped) = name.strip_prefix("level") {
+            if let Ok(index) = stripped.parse::<usize>() {
+                if index > 0 && index <= self.input_count {
+                    Some(self.levels[index - 1])
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
         }
     }
 }
@@ -609,7 +1010,7 @@ impl GraphModule for GraphEnvelope {
                 self.decay = value;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 

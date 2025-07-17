@@ -1,0 +1,3 @@
+# Brown noise test - deeper, rumbling sound
+noise: noise
+out <- noise.brown

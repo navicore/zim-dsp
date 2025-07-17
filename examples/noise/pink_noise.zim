@@ -1,0 +1,3 @@
+# Pink noise test - warmer, more natural than white
+noise: noise
+out <- noise.pink

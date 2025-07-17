@@ -1,0 +1,31 @@
+# Stereo output test
+# Two oscillators panned left and right
+
+# Left oscillator (440 Hz)
+vco1: osc sine 440
+env1: envelope 0.01 0.5
+vca1: vca 1.0
+
+# Right oscillator (slightly detuned at 445 Hz)
+vco2: osc sine 445  
+env2: envelope 0.01 0.5
+vca2: vca 1.0
+
+# Use a clock to trigger both
+clock: lfo 1  # 1 Hz trigger
+
+# Connect envelopes to clock
+env1.gate <- clock.gate
+env2.gate <- clock.gate
+
+# Left channel path
+vca1.audio <- vco1.sine
+vca1.cv <- env1.out
+
+# Right channel path
+vca2.audio <- vco2.sine
+vca2.cv <- env2.out
+
+# Stereo output
+out.left <- vca1.out
+out.right <- vca2.out

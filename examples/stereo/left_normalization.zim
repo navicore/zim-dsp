@@ -1,0 +1,14 @@
+# Test left-to-right normalization
+# When only left is connected, it should copy to right
+
+vco: osc sine 440
+env: envelope 0.01 0.5
+vca: vca 1.0
+clock: lfo 0.5
+
+env.gate <- clock.gate
+vca.audio <- vco.sine
+vca.cv <- env.out
+
+# Only connect left - right should get the same signal
+out.left <- vca.out

@@ -12,6 +12,8 @@ pub enum ModuleType {
     Output,
     Lfo,
     ManualGate,
+    StereoOutput,
+    Noise,
 }
 
 impl std::fmt::Display for ModuleType {
@@ -25,6 +27,8 @@ impl std::fmt::Display for ModuleType {
             Self::Output => write!(f, "out"),
             Self::Lfo => write!(f, "lfo"),
             Self::ManualGate => write!(f, "gate"),
+            Self::StereoOutput => write!(f, "stereo_out"),
+            Self::Noise => write!(f, "noise"),
         }
     }
 }
@@ -36,10 +40,11 @@ pub fn parse_module_type(s: &str) -> Result<ModuleType> {
         "filter" => Ok(ModuleType::Filter),
         "env" | "envelope" => Ok(ModuleType::Envelope),
         "vca" => Ok(ModuleType::Vca),
-        "mix" | "mixer" => Ok(ModuleType::Mixer),
+        "mix" | "mixer" | "mono_mixer" => Ok(ModuleType::Mixer),
         "out" | "output" => Ok(ModuleType::Output),
         "lfo" => Ok(ModuleType::Lfo),
         "gate" | "manual" => Ok(ModuleType::ManualGate),
+        "noise" | "noise_gen" => Ok(ModuleType::Noise),
         _ => Err(anyhow!("Unknown module type: {s}")),
     }
 }
