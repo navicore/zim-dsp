@@ -1,54 +1,48 @@
 # Zim-DSP Examples
 
-This directory contains example patches demonstrating the zim-dsp modular synthesizer system.
+Examples are organized by the primary module being demonstrated:
 
-## Patch Files (.zim)
+## Oscillator Examples (`oscillator/`)
+- `basic_sine.zim` - Simple sine wave oscillator
+- `waveforms.zim` - Different waveform types (sine, saw, square, triangle)
 
-### 01_basic_sine.zim
-The simplest possible patch - a sine wave oscillator connected to the output.
+## Filter Examples (`filter/`)
+- `filter_modulation.zim` - LFO modulating filter cutoff
+- `wind_effect.zim` - Filtered pink noise creating wind sounds
 
-### 02_waveforms.zim
-Demonstrates the different waveform outputs available from oscillators (sine, saw, square, triangle).
+## Envelope Examples (`envelope/`)
+- `amplitude_control.zim` - Basic AD envelope shaping amplitude
+- `lfo_triggered_envelope.zim` - LFO triggering envelope
 
-### 03_amplitude_control.zim
-Shows how to use a VCA (Voltage Controlled Amplifier) with an envelope to control amplitude over time.
+## Noise Examples (`noise/`)
+- `white_noise.zim` - Pure white noise
+- `pink_noise.zim` - Pink noise (-3dB/octave)
+- `brown_noise.zim` - Brown noise (-6dB/octave)
+- `hihat_clock.zim` - Musical hi-hat using filtered white noise
 
-### 04_filter_modulation.zim
-Demonstrates using an LFO to modulate a filter's cutoff frequency, creating a classic filter sweep effect.
+## Stereo Examples (`stereo/`)
+- `stereo_test.zim` - Left/right channel separation
+- `mono_compatibility.zim` - Mono output routing to both channels
+- `left_normalization.zim` - Left channel auto-normalizing to right
 
-### 05_complex_routing.zim
-A more complex patch with multiple oscillators and envelope-controlled filtering.
+## Manual Gate Examples (`manual_gate/`)
+- `manual_gate.zim` - Basic manual gate usage
+- `amplitude_control_manual.zim` - Manual gate triggering envelope
 
-### 06_audio_rate_modulation.zim
-Demonstrates the Serge philosophy of using audio-rate signals as control voltages for AM synthesis.
+## Complex Examples (`complex/`)
+- `complex_routing.zim` - Multiple modules with complex routing
+- `audio_rate_modulation.zim` - Audio-rate modulation examples
 
 ## Running Examples
 
-To play an example patch:
+Run any example with:
 ```bash
-cargo run -- play examples/01_basic_sine.zim
+cargo run --release -- play examples/noise/white_noise.zim
 ```
 
-To load an example in the REPL:
+Or load into the REPL for interactive experimentation:
 ```bash
-cargo run -- repl
-> load examples/03_amplitude_control.zim
-> start
+cargo run --release -- repl
+# Then paste the example contents
 ```
-
-## Key Concepts
-
-1. **Named Ports**: All connections specify both the source and destination ports explicitly (e.g., `vca.audio <- vco.sine`)
-
-2. **Multiple Outputs**: Modules can have multiple outputs. Oscillators provide sine, saw, square, and triangle simultaneously.
-
-3. **Expression Support**: Connections can include scaling and offset operations (e.g., `vcf.cutoff <- lfo.sine * 1000 + 1500`)
-
-4. **Audio-Rate Everything**: Following Serge design philosophy, any signal can be used at audio rate for modulation.
-
-## Code Examples
-
-The `.rs` files demonstrate how to use the graph execution engine programmatically:
-
-- `graph_test.rs` - Basic graph construction and execution
-- `introspection_demo.rs` - Module introspection capabilities
+EOF < /dev/null
