@@ -889,6 +889,193 @@ impl GraphModule for GraphMonoMixer {
     }
 }
 
+/// Slew generator module - smooths stepped CV signals
+pub struct GraphSlewGen {
+    rise_time: f32, // Time to rise from 0 to 1
+    fall_time: f32, // Time to fall from 1 to 0
+    current_value: f32,
+    target_value: f32,
+    sample_rate: f32,
+    curve_type: SlewCurve,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SlewCurve {
+    Linear,
+    Exponential,
+    Logarithmic,
+}
+
+impl GraphSlewGen {
+    pub fn new(rise_time: f32, fall_time: f32) -> Self {
+        Self {
+            rise_time,
+            fall_time,
+            current_value: 0.0,
+            target_value: 0.0,
+            sample_rate: 44100.0,
+            curve_type: SlewCurve::Linear,
+        }
+    }
+
+    fn apply_curve(&self, progress: f32) -> f32 {
+        match self.curve_type {
+            SlewCurve::Linear => progress,
+            SlewCurve::Exponential => {
+                // Exponential curve: fast at start, slow at end
+                1.0 - (-4.0 * progress).exp()
+            }
+            SlewCurve::Logarithmic => {
+                // Logarithmic curve: slow at start, fast at end
+                if progress <= 0.0 {
+                    0.0
+                } else {
+                    (1.0 + 4.0 * progress).ln() / (1.0_f32 + 4.0).ln()
+                }
+            }
+        }
+    }
+
+    fn set_curve_from_param(&mut self, value: f32) {
+        self.curve_type = match value as i32 {
+            0 => SlewCurve::Linear,
+            1 => SlewCurve::Exponential,
+            2 => SlewCurve::Logarithmic,
+            _ => SlewCurve::Linear,
+        };
+    }
+}
+
+impl Default for GraphSlewGen {
+    fn default() -> Self {
+        Self::new(0.1, 0.1) // 100ms rise/fall
+    }
+}
+
+impl GraphModule for GraphSlewGen {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "in".to_string(),
+                default_value: 0.0,
+                description: "Input signal to smooth".to_string(),
+            },
+            PortDescriptor {
+                name: "rise".to_string(),
+                default_value: 0.1,
+                description: "Rise time in seconds".to_string(),
+            },
+            PortDescriptor {
+                name: "fall".to_string(),
+                default_value: 0.1,
+                description: "Fall time in seconds".to_string(),
+            },
+            PortDescriptor {
+                name: "curve".to_string(),
+                default_value: 0.0,
+                description: "Curve type: 0=linear, 1=exponential, 2=logarithmic".to_string(),
+            },
+        ]
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![PortDescriptor {
+            name: "out".to_string(),
+            default_value: 0.0,
+            description: "Smoothed output signal".to_string(),
+        }]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let input_signal = inputs.get("in").map(|b| b.as_slice()).unwrap_or(&[]);
+        let rise_cv = inputs.get("rise").map(|b| b.as_slice()).unwrap_or(&[]);
+        let fall_cv = inputs.get("fall").map(|b| b.as_slice()).unwrap_or(&[]);
+        let curve_cv = inputs.get("curve").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        let out = outputs.get_mut("out").unwrap();
+
+        for i in 0..sample_count {
+            // Get current parameter values
+            let input_value = if i < input_signal.len() { input_signal[i] } else { 0.0 };
+            let rise_time = if i < rise_cv.len() { rise_cv[i] } else { self.rise_time };
+            let fall_time = if i < fall_cv.len() { fall_cv[i] } else { self.fall_time };
+
+            // Update curve type if CV changed
+            if i < curve_cv.len() {
+                self.set_curve_from_param(curve_cv[i]);
+            }
+
+            // Update target if input changed
+            if (input_value - self.target_value).abs() > 0.001 {
+                self.target_value = input_value;
+            }
+
+            // Calculate slew
+            if (self.current_value - self.target_value).abs() > 0.001 {
+                let time_constant = if self.target_value > self.current_value {
+                    rise_time.max(0.001) // Prevent division by zero
+                } else {
+                    fall_time.max(0.001)
+                };
+
+                // Calculate progress (0 to 1)
+                let distance = (self.target_value - self.current_value).abs();
+                let step_size = 1.0 / (time_constant * self.sample_rate);
+
+                // Apply curve shaping to step size
+                let progress = 1.0 - distance; // 0 when far from target, 1 when close
+                let curve_factor = self.apply_curve(progress);
+                let shaped_step = step_size * curve_factor;
+
+                let actual_step = shaped_step * (self.target_value - self.current_value);
+                self.current_value += actual_step;
+
+                // Clamp to target if very close
+                if (self.current_value - self.target_value).abs() < 0.001 {
+                    self.current_value = self.target_value;
+                }
+            }
+
+            out[i] = self.current_value;
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        match name {
+            "rise" => {
+                self.rise_time = value.max(0.001);
+                Ok(())
+            }
+            "fall" => {
+                self.fall_time = value.max(0.001);
+                Ok(())
+            }
+            "curve" => {
+                self.set_curve_from_param(value);
+                Ok(())
+            }
+            _ => Err(anyhow!("Unknown parameter: {}", name)),
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        match name {
+            "rise" => Some(self.rise_time),
+            "fall" => Some(self.fall_time),
+            "curve" => Some(match self.curve_type {
+                SlewCurve::Linear => 0.0,
+                SlewCurve::Exponential => 1.0,
+                SlewCurve::Logarithmic => 2.0,
+            }),
+            _ => None,
+        }
+    }
+}
+
 /// Envelope generator
 pub struct GraphEnvelope {
     attack: f32,
@@ -1019,6 +1206,240 @@ impl GraphModule for GraphEnvelope {
             "attack" => Some(self.attack),
             "decay" => Some(self.decay),
             _ => None,
+        }
+    }
+}
+
+/// 8-step sequencer with CV and gate outputs
+pub struct GraphSeq8 {
+    steps: [f32; 8],
+    gates: [bool; 8],
+    current_step: usize,
+    last_clock: f32,
+    clock_count: usize,
+    gate_length: f32,
+    samples_since_clock: usize,
+    sample_rate: f32,
+}
+
+impl GraphSeq8 {
+    pub fn new() -> Self {
+        Self {
+            steps: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], // Default ascending pattern
+            gates: [true; 8],                                // All gates on by default
+            current_step: 0,
+            last_clock: 0.0,
+            clock_count: 0,
+            gate_length: 0.1, // 100ms gate length
+            samples_since_clock: 0,
+            sample_rate: 44100.0,
+        }
+    }
+
+    fn get_gate_length_samples(&self) -> usize {
+        (self.gate_length * self.sample_rate) as usize
+    }
+}
+
+impl Default for GraphSeq8 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphModule for GraphSeq8 {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        let mut inputs = vec![
+            PortDescriptor {
+                name: "clock".to_string(),
+                default_value: 0.0,
+                description: "Clock input to advance sequence".to_string(),
+            },
+            PortDescriptor {
+                name: "reset".to_string(),
+                default_value: 0.0,
+                description: "Reset to step 1".to_string(),
+            },
+            PortDescriptor {
+                name: "gate_length".to_string(),
+                default_value: 0.1,
+                description: "Gate length in seconds".to_string(),
+            },
+        ];
+
+        // Add step value inputs
+        for i in 0..8 {
+            inputs.push(PortDescriptor {
+                name: format!("step{}", i + 1),
+                default_value: (i as f32) / 7.0, // 0 to 1 range
+                description: format!("CV value for step {}", i + 1),
+            });
+        }
+
+        // Add gate enable inputs
+        for i in 0..8 {
+            inputs.push(PortDescriptor {
+                name: format!("gate{}", i + 1),
+                default_value: 1.0,
+                description: format!("Gate enable for step {} (>0.5 = on)", i + 1),
+            });
+        }
+
+        inputs
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "cv".to_string(),
+                default_value: 0.0,
+                description: "CV output for current step".to_string(),
+            },
+            PortDescriptor {
+                name: "gate".to_string(),
+                default_value: 0.0,
+                description: "Gate output for current step".to_string(),
+            },
+            PortDescriptor {
+                name: "step".to_string(),
+                default_value: 0.0,
+                description: "Current step number (0-7)".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let clock = inputs.get("clock").map(|b| b.as_slice()).unwrap_or(&[]);
+        let reset = inputs.get("reset").map(|b| b.as_slice()).unwrap_or(&[]);
+        let gate_length_cv = inputs.get("gate_length").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        // Get step values
+        let mut step_values = [0.0; 8];
+        for (i, value) in step_values.iter_mut().enumerate() {
+            if let Some(buffer) = inputs.get(&format!("step{}", i + 1)) {
+                if let Some(input_value) = buffer.as_slice().first() {
+                    *value = *input_value;
+                }
+            }
+        }
+
+        // Get gate enables
+        let mut gate_enables = [true; 8];
+        for (i, enable) in gate_enables.iter_mut().enumerate() {
+            if let Some(buffer) = inputs.get(&format!("gate{}", i + 1)) {
+                if let Some(value) = buffer.as_slice().first() {
+                    *enable = *value > 0.5;
+                }
+            }
+        }
+
+        let [cv_out, gate_out, step_out] = outputs.get_many_mut(["cv", "gate", "step"]);
+        let cv_out = cv_out.unwrap();
+        let gate_out = gate_out.unwrap();
+        let step_out = step_out.unwrap();
+
+        for i in 0..sample_count {
+            let current_clock = if i < clock.len() { clock[i] } else { 0.0 };
+            let current_reset = if i < reset.len() { reset[i] } else { 0.0 };
+            let current_gate_length =
+                if i < gate_length_cv.len() { gate_length_cv[i] } else { self.gate_length };
+
+            // Update gate length
+            self.gate_length = current_gate_length.max(0.001);
+
+            // Check for reset trigger
+            if current_reset > 0.5 {
+                self.current_step = 0;
+                self.samples_since_clock = 0;
+                self.clock_count = 0;
+            }
+
+            // Check for clock trigger (rising edge)
+            if current_clock > 0.5 && self.last_clock <= 0.5 {
+                self.current_step = (self.current_step + 1) % 8;
+                self.samples_since_clock = 0;
+                self.clock_count += 1;
+            }
+
+            // Update step values and gate enables
+            self.steps = step_values;
+            self.gates = gate_enables;
+
+            // Generate outputs
+            cv_out[i] = self.steps[self.current_step];
+            step_out[i] = self.current_step as f32;
+
+            // Gate output depends on gate enable and timing
+            let gate_samples = self.get_gate_length_samples();
+            let gate_active =
+                self.gates[self.current_step] && self.samples_since_clock < gate_samples;
+            gate_out[i] = if gate_active { 1.0 } else { 0.0 };
+
+            self.last_clock = current_clock;
+            self.samples_since_clock += 1;
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        match name {
+            "gate_length" => {
+                self.gate_length = value.max(0.001);
+                Ok(())
+            }
+            _ => {
+                // Check for step parameters
+                if let Some(step_str) = name.strip_prefix("step") {
+                    if let Ok(step_num) = step_str.parse::<usize>() {
+                        if (1..=8).contains(&step_num) {
+                            self.steps[step_num - 1] = value;
+                            return Ok(());
+                        }
+                    }
+                }
+
+                // Check for gate parameters
+                if let Some(gate_str) = name.strip_prefix("gate") {
+                    if let Ok(gate_num) = gate_str.parse::<usize>() {
+                        if (1..=8).contains(&gate_num) {
+                            self.gates[gate_num - 1] = value > 0.5;
+                            return Ok(());
+                        }
+                    }
+                }
+
+                Err(anyhow!("Unknown parameter: {}", name))
+            }
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        match name {
+            "gate_length" => Some(self.gate_length),
+            _ => {
+                // Check for step parameters
+                if let Some(step_str) = name.strip_prefix("step") {
+                    if let Ok(step_num) = step_str.parse::<usize>() {
+                        if (1..=8).contains(&step_num) {
+                            return Some(self.steps[step_num - 1]);
+                        }
+                    }
+                }
+
+                // Check for gate parameters
+                if let Some(gate_str) = name.strip_prefix("gate") {
+                    if let Ok(gate_num) = gate_str.parse::<usize>() {
+                        if (1..=8).contains(&gate_num) {
+                            return Some(if self.gates[gate_num - 1] { 1.0 } else { 0.0 });
+                        }
+                    }
+                }
+
+                None
+            }
         }
     }
 }

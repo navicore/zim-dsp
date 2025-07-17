@@ -1,0 +1,29 @@
+# Basic 8-step sequencer test
+# Clock drives the sequence, CV controls oscillator pitch
+
+# Master clock
+clock: lfo 2  # 2 Hz clock
+
+# 8-step sequencer with default values
+seq: seq8
+
+# Oscillator controlled by sequencer CV
+vco: osc sine 440
+
+# Connect clock to sequencer
+seq.clock <- clock.gate
+
+# Use sequencer CV to control oscillator frequency
+# (This will need expression support to work properly)
+vco.freq <- 440  # Fixed for now
+
+# Envelope triggered by sequencer gates
+env: envelope 0.01 0.1
+vca: vca 0.5
+
+# Connect sequencer gate to envelope
+env.gate <- seq.gate
+vca.audio <- vco.sine
+vca.cv <- env.out
+
+out <- vca.out

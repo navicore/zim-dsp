@@ -1,0 +1,43 @@
+# 8-step sequencer with custom step values
+# Demonstrates setting individual step values
+
+# Master clock
+clock: lfo 1  # 1 Hz clock
+
+# 8-step sequencer
+seq: seq8
+
+# Connect clock to sequencer
+seq.clock <- clock.gate
+
+# Set custom step values (0-1 range)
+seq.step1 <- 0.0    # C
+seq.step2 <- 0.25   # E
+seq.step3 <- 0.5    # G
+seq.step4 <- 0.75   # B
+seq.step5 <- 1.0    # High C
+seq.step6 <- 0.5    # G
+seq.step7 <- 0.25   # E
+seq.step8 <- 0.0    # C
+
+# Oscillator to test the sequence
+vco: osc saw 220
+
+# Use step values to create a melody
+# For now, just output the raw CV values
+vca: vca 0.5
+vca.audio <- vco.saw
+vca.cv <- seq.cv
+
+# Envelope for gating
+env: envelope 0.01 0.2
+env.gate <- seq.gate
+
+# Mix the melodic content with the envelope
+mixer: mixer
+mixer.in1 <- vca.out
+mixer.in2 <- seq.cv  # Raw CV output for testing
+mixer.level1 <- 0.7
+mixer.level2 <- 0.3
+
+out <- mixer.out

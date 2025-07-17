@@ -29,6 +29,21 @@ Examples are organized by the primary module being demonstrated:
 - `manual_gate.zim` - Basic manual gate usage
 - `amplitude_control_manual.zim` - Manual gate triggering envelope
 
+## Mixer Examples (`mixer/`)
+- `mono_mixer.zim` - Basic mono mixer with level controls
+- `polyrhythm_demo.zim` - Complex polyrhythmic patterns using mixer
+
+## Slew Generator Examples (`slew/`)
+- `test_slew.zim` - Simple slew generator test smoothing a square wave
+- `smooth_filter.zim` - Using slew to smooth filter cutoff changes
+- `basic_portamento.zim` - Basic portamento effect using slew
+
+## Sequencer Examples (`sequencer/`)
+- `basic_seq.zim` - Basic 8-step sequencer with clock and gate outputs
+- `step_values.zim` - Setting custom step values for melodic sequences
+- `gate_pattern.zim` - Creating rhythmic patterns with gate enables
+- `reset_demo.zim` - Using reset to create different phrase lengths
+
 ## Complex Examples (`complex/`)
 - `complex_routing.zim` - Multiple modules with complex routing
 - `audio_rate_modulation.zim` - Audio-rate modulation examples

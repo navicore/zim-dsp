@@ -1,0 +1,46 @@
+# 8-step sequencer with reset functionality
+# Demonstrates how reset can create different phrase lengths
+
+# Master clock
+clock: lfo 3  # 3 Hz clock
+
+# Reset trigger - slower than main clock
+reset_clock: lfo 0.5  # Every 2 seconds
+
+# 8-step sequencer
+seq: seq8
+
+# Connect clock and reset
+seq.clock <- clock.gate
+seq.reset <- reset_clock.gate
+
+# Create a simple ascending pattern
+seq.step1 <- 0.1
+seq.step2 <- 0.2
+seq.step3 <- 0.3
+seq.step4 <- 0.4
+seq.step5 <- 0.5
+seq.step6 <- 0.6
+seq.step7 <- 0.7
+seq.step8 <- 0.8
+
+# Oscillator
+vco: osc triangle 330
+
+# Envelope
+env: envelope 0.01 0.15
+env.gate <- seq.gate
+
+# VCA
+vca: vca 0.5
+vca.audio <- vco.triangle
+vca.cv <- env.out
+
+# Mix sequencer CV with audio for monitoring
+mixer: mixer
+mixer.in1 <- vca.out
+mixer.in2 <- seq.cv  # CV monitoring
+mixer.level1 <- 0.8
+mixer.level2 <- 0.2
+
+out <- mixer.out

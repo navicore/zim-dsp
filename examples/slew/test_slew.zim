@@ -1,0 +1,9 @@
+# Simple slew test - smooth a square wave
+lfo: lfo 0.5  # 0.5 Hz square wave
+slew: slew_gen 0.5 0.2  # 500ms rise, 200ms fall
+
+# Connect square wave to slew input
+slew.in <- lfo.square
+
+# Output the smoothed signal
+out <- slew.out
