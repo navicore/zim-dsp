@@ -248,6 +248,8 @@ Connections:
     vca.cv <- env.output        - Control voltage
     env.gate <- clock.gate      - Clock triggers envelope
     vcf.cutoff <- lfo.sine * 2000 + 1000  - Scaled/offset
-    out <- vca.output           - Route to output"
+    out <- vca.out              - Mono to stereo output
+    out.left <- vca1.out        - Left channel only
+    out.right <- vca2.out       - Right channel only"
     );
 }

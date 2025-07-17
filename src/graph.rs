@@ -243,6 +243,10 @@ impl GraphExecutor {
         self.output_buffers.get(module)?.get(port)
     }
 
+    pub fn get_module_mut(&mut self, name: &str) -> Option<&mut Box<dyn GraphModule>> {
+        self.modules.get_mut(name)
+    }
+
     /// Get information about a module's ports
     pub fn inspect_module(&self, name: &str) -> Option<ModuleInfo> {
         let module = self.modules.get(name)?;

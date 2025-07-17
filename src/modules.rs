@@ -12,6 +12,7 @@ pub enum ModuleType {
     Output,
     Lfo,
     ManualGate,
+    StereoOutput,
 }
 
 impl std::fmt::Display for ModuleType {
@@ -25,6 +26,7 @@ impl std::fmt::Display for ModuleType {
             Self::Output => write!(f, "out"),
             Self::Lfo => write!(f, "lfo"),
             Self::ManualGate => write!(f, "gate"),
+            Self::StereoOutput => write!(f, "stereo_out"),
         }
     }
 }

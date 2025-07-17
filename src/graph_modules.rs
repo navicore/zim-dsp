@@ -488,6 +488,119 @@ impl GraphModule for GraphManualGate {
     }
 }
 
+/// Stereo output module - handles mono to stereo normalization
+pub struct GraphStereoOutput {
+    left_connected: bool,
+    right_connected: bool,
+}
+
+impl GraphStereoOutput {
+    pub fn new() -> Self {
+        Self {
+            left_connected: false,
+            right_connected: false,
+        }
+    }
+
+    pub fn set_left_connected(&mut self, connected: bool) {
+        self.left_connected = connected;
+    }
+
+    pub fn set_right_connected(&mut self, connected: bool) {
+        self.right_connected = connected;
+    }
+}
+
+impl Default for GraphStereoOutput {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphModule for GraphStereoOutput {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "left".to_string(),
+                default_value: 0.0,
+                description: "Left channel input".to_string(),
+            },
+            PortDescriptor {
+                name: "right".to_string(),
+                default_value: 0.0,
+                description: "Right channel input".to_string(),
+            },
+            PortDescriptor {
+                name: "mono".to_string(),
+                default_value: 0.0,
+                description: "Mono input (routed to both channels)".to_string(),
+            },
+        ]
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "left".to_string(),
+                default_value: 0.0,
+                description: "Left channel output".to_string(),
+            },
+            PortDescriptor {
+                name: "right".to_string(),
+                default_value: 0.0,
+                description: "Right channel output".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let left_in = inputs.get("left").map(|b| b.as_slice()).unwrap_or(&[]);
+        let right_in = inputs.get("right").map(|b| b.as_slice()).unwrap_or(&[]);
+        let mono_in = inputs.get("mono").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        let [left_out, right_out] = outputs.get_many_mut(["left", "right"]);
+        let left_out = left_out.unwrap();
+        let right_out = right_out.unwrap();
+
+        for i in 0..sample_count {
+            // Check if mono input is connected
+            let mono_sample = if i < mono_in.len() { mono_in[i] } else { 0.0 };
+
+            // Get stereo inputs
+            let left_sample = if i < left_in.len() { left_in[i] } else { 0.0 };
+            let right_sample = if i < right_in.len() { right_in[i] } else { 0.0 };
+
+            // If mono is connected, it overrides stereo inputs
+            if mono_sample != 0.0 || (!self.left_connected && !self.right_connected) {
+                left_out[i] = mono_sample;
+                right_out[i] = mono_sample;
+            } else {
+                // Handle stereo with normalization
+                left_out[i] = left_sample;
+
+                // If only left is connected, normalize to right
+                if self.left_connected && !self.right_connected {
+                    right_out[i] = left_sample;
+                } else {
+                    right_out[i] = right_sample;
+                }
+            }
+        }
+    }
+
+    fn set_param(&mut self, name: &str, _value: f32) -> Result<()> {
+        Err(anyhow!("Unknown parameter: {}", name))
+    }
+
+    fn get_param(&self, _name: &str) -> Option<f32> {
+        None
+    }
+}
+
 /// Envelope generator
 pub struct GraphEnvelope {
     attack: f32,

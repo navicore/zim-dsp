@@ -2,7 +2,8 @@
 
 use crate::graph::{Connection, ConnectionExpr, GraphExecutor, ModuleInfo};
 use crate::graph_modules::{
-    GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphOscillator, GraphVca,
+    GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphOscillator, GraphStereoOutput,
+    GraphVca,
 };
 use crate::modules::ModuleType;
 use crate::parser::{parse_line, Command};
@@ -20,6 +21,8 @@ pub struct GraphEngine {
     // Store output module and port for audio routing
     output_module: Option<String>,
     output_port: Option<String>,
+    // Track if we have a stereo output module
+    has_stereo_output: bool,
 }
 
 impl GraphEngine {
@@ -31,6 +34,7 @@ impl GraphEngine {
             sample_rate: 44100.0,
             output_module: None,
             output_port: None,
+            has_stereo_output: false,
         }
     }
 
@@ -72,15 +76,23 @@ impl GraphEngine {
             Command::Connect { from, to } => {
                 // Handle connections
                 if to == "out" {
-                    // Parse the from string to get module and port
-                    let parts: Vec<&str> = from.split('.').collect();
-                    if parts.len() == 2 {
-                        self.output_module = Some(parts[0].to_string());
-                        self.output_port = Some(parts[1].to_string());
-                        Ok(format!("Connected {from} to output"))
-                    } else {
-                        Err(anyhow!("Output source must be in format module.port"))
+                    // Create implicit stereo output module if needed
+                    if !self.has_stereo_output {
+                        self.create_module("_output".to_string(), ModuleType::StereoOutput, &[])?;
+                        self.has_stereo_output = true;
                     }
+
+                    // Route to stereo output's mono input
+                    self.parse_connection("_output.mono", &from)
+                } else if to.starts_with("out.") {
+                    // Direct stereo output routing (out.left, out.right)
+                    if !self.has_stereo_output {
+                        self.create_module("_output".to_string(), ModuleType::StereoOutput, &[])?;
+                        self.has_stereo_output = true;
+                    }
+
+                    let port = to.strip_prefix("out.").unwrap();
+                    self.parse_connection(&format!("_output.{port}"), &from)
                 } else if to.contains('.') {
                     // New style: dest already has port (e.g., vca.audio <- vco.sine)
                     self.parse_connection(&to, &from)
@@ -96,7 +108,7 @@ impl GraphEngine {
         }
     }
 
-    fn handle_extended_syntax(&mut self, line: &str) -> Result<String> {
+    fn handle_extended_syntax(&self, line: &str) -> Result<String> {
         // Handle new syntax patterns
 
         // Pattern: module.port <- source.port
@@ -113,19 +125,7 @@ impl GraphEngine {
         Err(anyhow!("Unrecognized syntax: {}", line))
     }
 
-    fn parse_connection(&mut self, dest: &str, source_expr: &str) -> Result<String> {
-        // Special case for output
-        if dest == "out" {
-            // Parse source to get module and port
-            let parts: Vec<&str> = source_expr.split('.').collect();
-            if parts.len() == 2 {
-                self.output_module = Some(parts[0].to_string());
-                self.output_port = Some(parts[1].to_string());
-                return Ok(format!("Connected {source_expr} to audio output"));
-            }
-            return Err(anyhow!("Output must be connected to a module.port"));
-        }
-
+    fn parse_connection(&self, dest: &str, source_expr: &str) -> Result<String> {
         // Parse destination
         let dest_parts: Vec<&str> = dest.split('.').collect();
         if dest_parts.len() != 2 {
@@ -136,11 +136,33 @@ impl GraphEngine {
         // Parse source expression (could be complex)
         let expr = Self::parse_connection_expr(source_expr)?;
 
-        self.graph.lock().unwrap().add_connection(Connection {
-            to_module: dest_module.to_string(),
-            to_port: dest_port.to_string(),
-            expression: expr,
-        });
+        // Track connections to stereo output module
+        if dest_module == "_output" {
+            let mut graph = self.graph.lock().unwrap();
+
+            // Update connection state in the stereo output module
+            if let Some(module) = graph.get_module_mut("_output") {
+                if let Some(stereo_out) = module.as_any_mut().downcast_mut::<GraphStereoOutput>() {
+                    match dest_port {
+                        "left" => stereo_out.set_left_connected(true),
+                        "right" => stereo_out.set_right_connected(true),
+                        _ => {}
+                    }
+                }
+            }
+
+            graph.add_connection(Connection {
+                to_module: dest_module.to_string(),
+                to_port: dest_port.to_string(),
+                expression: expr,
+            });
+        } else {
+            self.graph.lock().unwrap().add_connection(Connection {
+                to_module: dest_module.to_string(),
+                to_port: dest_port.to_string(),
+                expression: expr,
+            });
+        }
 
         Ok(format!("Connected: {dest} <- {source_expr}"))
     }
@@ -215,6 +237,7 @@ impl GraphEngine {
                 Box::new(GraphLfo::new(frequency))
             }
             ModuleType::ManualGate => Box::new(GraphManualGate::new()),
+            ModuleType::StereoOutput => Box::new(GraphStereoOutput::new()),
             _ => return Err(anyhow!("Module type {:?} not yet implemented", module_type)),
         };
 
@@ -247,9 +270,12 @@ impl GraphEngine {
         // Clone the graph reference for the audio thread
         let graph_clone = Arc::clone(&self.graph);
 
-        // Store output module and port for audio routing
-        let output_module = self.output_module.clone();
-        let output_port = self.output_port.clone().unwrap_or_else(|| "output".to_string());
+        // For stereo output, we'll use the _output module
+        let output_module = if self.has_stereo_output {
+            Some("_output".to_string())
+        } else {
+            self.output_module.clone()
+        };
 
         // Build the output stream
         let stream = match config.sample_format() {
@@ -258,21 +284,21 @@ impl GraphEngine {
                 &config.into(),
                 graph_clone,
                 output_module,
-                output_port,
+                self.has_stereo_output,
             )?,
             cpal::SampleFormat::I16 => Self::build_stream::<i16>(
                 &device,
                 &config.into(),
                 graph_clone,
                 output_module,
-                output_port,
+                self.has_stereo_output,
             )?,
             cpal::SampleFormat::U16 => Self::build_stream::<u16>(
                 &device,
                 &config.into(),
                 graph_clone,
                 output_module,
-                output_port,
+                self.has_stereo_output,
             )?,
             _ => {
                 return Err(anyhow!("Unsupported sample format"));
@@ -304,6 +330,7 @@ impl GraphEngine {
         *self.graph.lock().unwrap() = GraphExecutor::new();
         self.output_module = None;
         self.output_port = None;
+        self.has_stereo_output = false;
     }
 
     /// List all modules
@@ -337,7 +364,7 @@ impl GraphEngine {
         config: &cpal::StreamConfig,
         graph: Arc<Mutex<GraphExecutor>>,
         output_module: Option<String>,
-        output_port: String,
+        is_stereo: bool,
     ) -> Result<cpal::Stream>
     where
         T: cpal::Sample + cpal::SizedSample + cpal::FromSample<f32>,
@@ -363,14 +390,40 @@ impl GraphEngine {
 
                     // Get output from the designated module
                     if let Some(ref output_module) = output_module {
-                        if let Some(buffer) = graph.get_output(output_module, &output_port) {
-                            // Copy the output buffer to the audio stream
-                            for (i, frame) in data.chunks_mut(channels).enumerate() {
-                                if i < buffer.len() {
-                                    let value = buffer[i];
-                                    let sample = cpal::Sample::from_sample(value);
-                                    for channel_sample in frame.iter_mut() {
-                                        *channel_sample = sample;
+                        if is_stereo {
+                            // Get stereo output
+                            let left_buffer = graph.get_output(output_module, "left");
+                            let right_buffer = graph.get_output(output_module, "right");
+
+                            if let (Some(left), Some(right)) = (left_buffer, right_buffer) {
+                                // Interleave stereo samples
+                                for (i, frame) in data.chunks_mut(channels).enumerate() {
+                                    if i < left.len() && i < right.len() {
+                                        let left_sample = cpal::Sample::from_sample(left[i]);
+                                        let right_sample = cpal::Sample::from_sample(right[i]);
+
+                                        if channels >= 2 {
+                                            frame[0] = left_sample;
+                                            frame[1] = right_sample;
+                                        } else {
+                                            // Mono output - mix left and right
+                                            let mixed = (left[i] + right[i]) * 0.5;
+                                            frame[0] = cpal::Sample::from_sample(mixed);
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // Legacy mono output
+                            if let Some(buffer) = graph.get_output(output_module, "output") {
+                                // Copy the output buffer to the audio stream
+                                for (i, frame) in data.chunks_mut(channels).enumerate() {
+                                    if i < buffer.len() {
+                                        let value = buffer[i];
+                                        let sample = cpal::Sample::from_sample(value);
+                                        for channel_sample in frame.iter_mut() {
+                                            *channel_sample = sample;
+                                        }
                                     }
                                 }
                             }
