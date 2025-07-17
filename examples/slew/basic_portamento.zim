@@ -1,0 +1,34 @@
+# Basic portamento using slew generator
+# Smooths stepped changes in pitch
+
+# Clock to create stepped changes
+clock: lfo 0.5
+
+# Create a stepped control voltage (simple square wave)
+# This simulates stepped pitch changes
+stepped_cv: lfo 0.25  # Slow square wave
+
+# Slew generator to smooth the steps
+slew: slew_gen 0.3 0.2  # 300ms rise, 200ms fall
+
+# Oscillator controlled by smoothed CV
+vco: osc sine 440
+
+# Apply slew to the stepped CV
+slew.in <- stepped_cv.square
+
+# Scale and offset the slewed CV for pitch
+# This creates smooth pitch changes
+# (We need expression support for this to work properly)
+# For now, just demonstrate the slew concept
+vco.freq <- 440  # Fixed frequency for now
+
+# Gate the output with the clock
+env: envelope 0.01 0.3
+vca: vca 0.5
+
+env.gate <- clock.gate
+vca.audio <- vco.sine
+vca.cv <- env.out
+
+out <- vca.out

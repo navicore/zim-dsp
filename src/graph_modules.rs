@@ -889,6 +889,201 @@ impl GraphModule for GraphMonoMixer {
     }
 }
 
+/// Slew generator module - smooths stepped CV signals
+pub struct GraphSlewGen {
+    rise_time: f32,    // Time to rise from 0 to 1
+    fall_time: f32,    // Time to fall from 1 to 0
+    current_value: f32,
+    target_value: f32,
+    sample_rate: f32,
+    curve_type: SlewCurve,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SlewCurve {
+    Linear,
+    Exponential,
+    Logarithmic,
+}
+
+impl GraphSlewGen {
+    pub fn new(rise_time: f32, fall_time: f32) -> Self {
+        Self {
+            rise_time,
+            fall_time,
+            current_value: 0.0,
+            target_value: 0.0,
+            sample_rate: 44100.0,
+            curve_type: SlewCurve::Linear,
+        }
+    }
+
+    fn apply_curve(&self, progress: f32) -> f32 {
+        match self.curve_type {
+            SlewCurve::Linear => progress,
+            SlewCurve::Exponential => {
+                // Exponential curve: fast at start, slow at end
+                1.0 - (-4.0 * progress).exp()
+            }
+            SlewCurve::Logarithmic => {
+                // Logarithmic curve: slow at start, fast at end
+                if progress <= 0.0 {
+                    0.0
+                } else {
+                    (1.0 + 4.0 * progress).ln() / (1.0_f32 + 4.0).ln()
+                }
+            }
+        }
+    }
+
+    fn set_curve_from_param(&mut self, value: f32) {
+        self.curve_type = match value as i32 {
+            0 => SlewCurve::Linear,
+            1 => SlewCurve::Exponential,
+            2 => SlewCurve::Logarithmic,
+            _ => SlewCurve::Linear,
+        };
+    }
+}
+
+impl Default for GraphSlewGen {
+    fn default() -> Self {
+        Self::new(0.1, 0.1) // 100ms rise/fall
+    }
+}
+
+impl GraphModule for GraphSlewGen {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "in".to_string(),
+                default_value: 0.0,
+                description: "Input signal to smooth".to_string(),
+            },
+            PortDescriptor {
+                name: "rise".to_string(),
+                default_value: 0.1,
+                description: "Rise time in seconds".to_string(),
+            },
+            PortDescriptor {
+                name: "fall".to_string(),
+                default_value: 0.1,
+                description: "Fall time in seconds".to_string(),
+            },
+            PortDescriptor {
+                name: "curve".to_string(),
+                default_value: 0.0,
+                description: "Curve type: 0=linear, 1=exponential, 2=logarithmic".to_string(),
+            },
+        ]
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![PortDescriptor {
+            name: "out".to_string(),
+            default_value: 0.0,
+            description: "Smoothed output signal".to_string(),
+        }]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let input_signal = inputs.get("in").map(|b| b.as_slice()).unwrap_or(&[]);
+        let rise_cv = inputs.get("rise").map(|b| b.as_slice()).unwrap_or(&[]);
+        let fall_cv = inputs.get("fall").map(|b| b.as_slice()).unwrap_or(&[]);
+        let curve_cv = inputs.get("curve").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        let out = outputs.get_mut("out").unwrap();
+
+        for i in 0..sample_count {
+            // Get current parameter values
+            let input_value = if i < input_signal.len() { input_signal[i] } else { 0.0 };
+            let rise_time = if i < rise_cv.len() { rise_cv[i] } else { self.rise_time };
+            let fall_time = if i < fall_cv.len() { fall_cv[i] } else { self.fall_time };
+            
+            // Update curve type if CV changed
+            if i < curve_cv.len() {
+                self.set_curve_from_param(curve_cv[i]);
+            }
+
+            // Update target if input changed
+            if (input_value - self.target_value).abs() > 0.001 {
+                self.target_value = input_value;
+            }
+
+            // Calculate slew
+            if (self.current_value - self.target_value).abs() > 0.001 {
+                let time_constant = if self.target_value > self.current_value {
+                    rise_time.max(0.001) // Prevent division by zero
+                } else {
+                    fall_time.max(0.001)
+                };
+
+                // Calculate progress (0 to 1)
+                let distance = (self.target_value - self.current_value).abs();
+                let step_size = 1.0 / (time_constant * self.sample_rate);
+                
+                // Apply curve shaping to step size
+                let shaped_step = match self.curve_type {
+                    SlewCurve::Linear => step_size,
+                    SlewCurve::Exponential => {
+                        // Exponential: fast initially, slow near target
+                        step_size * (distance + 0.1)
+                    }
+                    SlewCurve::Logarithmic => {
+                        // Logarithmic: slow initially, fast near target
+                        step_size * (2.0 - distance).max(0.1)
+                    }
+                };
+
+                let actual_step = shaped_step * (self.target_value - self.current_value);
+                self.current_value += actual_step;
+
+                // Clamp to target if very close
+                if (self.current_value - self.target_value).abs() < 0.001 {
+                    self.current_value = self.target_value;
+                }
+            }
+
+            out[i] = self.current_value;
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        match name {
+            "rise" => {
+                self.rise_time = value.max(0.001);
+                Ok(())
+            }
+            "fall" => {
+                self.fall_time = value.max(0.001);
+                Ok(())
+            }
+            "curve" => {
+                self.set_curve_from_param(value);
+                Ok(())
+            }
+            _ => Err(anyhow!("Unknown parameter: {}", name)),
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        match name {
+            "rise" => Some(self.rise_time),
+            "fall" => Some(self.fall_time),
+            "curve" => Some(match self.curve_type {
+                SlewCurve::Linear => 0.0,
+                SlewCurve::Exponential => 1.0,
+                SlewCurve::Logarithmic => 2.0,
+            }),
+            _ => None,
+        }
+    }
+}
+
 /// Envelope generator
 pub struct GraphEnvelope {
     attack: f32,

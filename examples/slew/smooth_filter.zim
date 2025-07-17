@@ -1,0 +1,41 @@
+# Smooth filter cutoff changes with slew generator
+# Creates gradual filter sweeps instead of stepped changes
+
+# Audio source
+vco: osc saw 220
+noise: noise
+
+# Mix sawtooth and noise for rich timbre
+mix: mixer
+mix.in1 <- vco.saw
+mix.in2 <- noise.pink
+mix.level2 <- 0.2
+
+# LFO to create stepped changes
+lfo_steps: lfo 0.3  # Slow for obvious steps
+
+# Slew generator for smooth transitions
+slew: slew_gen 0.8 0.5  # Slow rise, medium fall
+
+# Filter with smoothed cutoff
+vcf: filter
+vcf.audio <- mix.out
+vcf.res <- 0.6
+
+# Apply stepped LFO to slew input
+slew.in <- lfo_steps.square
+
+# The slew output would normally control filter cutoff
+# For now, set fixed values to demonstrate the concept
+vcf.cutoff <- 1000
+
+# Simple envelope for gating
+clock: lfo 1
+env: envelope 0.05 0.4
+vca: vca 0.6
+
+env.gate <- clock.gate
+vca.audio <- vcf.lp
+vca.cv <- env.out
+
+out <- vca.out
