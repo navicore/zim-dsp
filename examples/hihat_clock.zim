@@ -1,0 +1,24 @@
+# Hi-hat keeping time using white noise
+# Classic electronic hi-hat sound
+
+noise: noise
+clock: lfo 2  # 2 Hz = 120 BPM eighth notes
+
+# Short, snappy envelope for hi-hat
+env: envelope 0.001 0.1  # 1ms attack, 100ms decay
+
+# High-pass filter to make it sound more metallic
+vcf: filter
+vcf.cutoff <- 4000  # High cutoff for brightness
+vcf.res <- 0.3
+
+# VCA to shape the sound
+vca: vca 0.4  # Moderate volume
+
+# Connect the chain
+env.gate <- clock.gate
+vcf.audio <- noise.white
+vca.audio <- vcf.hp  # Use high-pass output
+vca.cv <- env.out
+
+out <- vca.out

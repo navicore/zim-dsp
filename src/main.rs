@@ -242,6 +242,7 @@ Patch Syntax:
     vca: vca 1.0                - Create VCA
     clock: lfo 0.5              - Create LFO (0.5 Hz)
     gate: manual                - Create manual gate
+    noise: noise                - Create noise generator
     
 Connections:
     vcf.audio <- vco.sine       - Simple connection

@@ -601,6 +601,148 @@ impl GraphModule for GraphStereoOutput {
     }
 }
 
+/// Noise generator with multiple noise colors
+pub struct GraphNoiseGen {
+    // Random number generator state
+    rng_state: u32,
+    // Pink noise state (Paul Kellet's method)
+    pink_state: [f32; 7],
+    // Brown noise state
+    brown_state: f32,
+}
+
+impl GraphNoiseGen {
+    pub fn new() -> Self {
+        Self {
+            rng_state: 12345, // Seed
+            pink_state: [0.0; 7],
+            brown_state: 0.0,
+        }
+    }
+
+    // Linear congruential generator for white noise
+    fn next_random(&mut self) -> f32 {
+        self.rng_state = self.rng_state.wrapping_mul(1664525).wrapping_add(1013904223);
+        // Convert to float in range -1 to 1
+        (self.rng_state as i32 as f32) / (i32::MAX as f32)
+    }
+
+    // Generate pink noise using Paul Kellet's method
+    #[allow(clippy::excessive_precision)]
+    fn generate_pink(&mut self) -> f32 {
+        let white = self.next_random();
+
+        // Update the state variables
+        self.pink_state[0] = 0.99886 * self.pink_state[0] + white * 0.0555179;
+        self.pink_state[1] = 0.99332 * self.pink_state[1] + white * 0.0750759;
+        self.pink_state[2] = 0.96900 * self.pink_state[2] + white * 0.1538520;
+        self.pink_state[3] = 0.86650 * self.pink_state[3] + white * 0.3104856;
+        self.pink_state[4] = 0.55000 * self.pink_state[4] + white * 0.5329522;
+        self.pink_state[5] = -0.7616 * self.pink_state[5] + white * 0.0168980;
+
+        let pink = self.pink_state[0]
+            + self.pink_state[1]
+            + self.pink_state[2]
+            + self.pink_state[3]
+            + self.pink_state[4]
+            + self.pink_state[5]
+            + self.pink_state[6]
+            + white * 0.5362;
+
+        self.pink_state[6] = white * 0.115926;
+
+        // Compensate for gain
+        pink * 0.11
+    }
+
+    // Generate brown noise (red noise) by integrating white noise
+    fn generate_brown(&mut self) -> f32 {
+        let white = self.next_random();
+        self.brown_state += white * 0.02; // Small step size
+
+        // Prevent runaway - soft clip
+        if self.brown_state > 1.0 {
+            self.brown_state = 1.0 - (self.brown_state - 1.0) * 0.5;
+        } else if self.brown_state < -1.0 {
+            self.brown_state = -1.0 - (self.brown_state + 1.0) * 0.5;
+        }
+
+        self.brown_state
+    }
+}
+
+impl Default for GraphNoiseGen {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphModule for GraphNoiseGen {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![] // No inputs - noise is a source
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "white".to_string(),
+                default_value: 0.0,
+                description: "White noise output (flat spectrum)".to_string(),
+            },
+            PortDescriptor {
+                name: "pink".to_string(),
+                default_value: 0.0,
+                description: "Pink noise output (-3dB/octave)".to_string(),
+            },
+            PortDescriptor {
+                name: "brown".to_string(),
+                default_value: 0.0,
+                description: "Brown/red noise output (-6dB/octave)".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, _inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let [white_out, pink_out, brown_out] = outputs.get_many_mut(["white", "pink", "brown"]);
+        let white_out = white_out.unwrap();
+        let pink_out = pink_out.unwrap();
+        let brown_out = brown_out.unwrap();
+
+        for i in 0..sample_count {
+            // Generate white noise
+            let white = self.next_random();
+            white_out[i] = white;
+
+            // Generate pink noise
+            pink_out[i] = self.generate_pink();
+
+            // Generate brown noise
+            brown_out[i] = self.generate_brown();
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        match name {
+            "seed" => {
+                self.rng_state = value as u32;
+                Ok(())
+            }
+            _ => Err(anyhow!("Unknown parameter: {}", name)),
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        match name {
+            "seed" => Some(self.rng_state as f32),
+            _ => None,
+        }
+    }
+}
+
 /// Envelope generator
 pub struct GraphEnvelope {
     attack: f32,

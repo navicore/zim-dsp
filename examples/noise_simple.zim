@@ -1,0 +1,3 @@
+# Simple noise test - should make continuous noise
+noise: noise
+out <- noise.white
