@@ -823,8 +823,8 @@ impl GraphModule for GraphMonoMixer {
         let mut level_buffers = Vec::new();
 
         for i in 1..=self.input_count {
-            let input = inputs.get(&format!("in{}", i)).map(|b| b.as_slice()).unwrap_or(&[]);
-            let level = inputs.get(&format!("level{}", i)).map(|b| b.as_slice()).unwrap_or(&[]);
+            let input = inputs.get(&format!("in{i}")).map(|b| b.as_slice()).unwrap_or(&[]);
+            let level = inputs.get(&format!("level{i}")).map(|b| b.as_slice()).unwrap_or(&[]);
             input_buffers.push(input);
             level_buffers.push(level);
         }
