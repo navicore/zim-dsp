@@ -110,7 +110,7 @@ impl GraphModule for GraphOscillator {
                 self.frequency = value;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 
@@ -189,7 +189,7 @@ impl GraphModule for GraphVca {
                 self.gain = value;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 
@@ -295,7 +295,7 @@ impl GraphModule for GraphFilter {
                 self.resonance = value;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 
@@ -399,7 +399,7 @@ impl GraphModule for GraphLfo {
                 self.frequency = value;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 
@@ -476,7 +476,7 @@ impl GraphModule for GraphManualGate {
                 self.gate_on = value > 0.5;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 
@@ -593,7 +593,7 @@ impl GraphModule for GraphStereoOutput {
     }
 
     fn set_param(&mut self, name: &str, _value: f32) -> Result<()> {
-        Err(anyhow!("Unknown parameter: {}", name))
+        Err(anyhow!("Unknown parameter: {name}"))
     }
 
     fn get_param(&self, _name: &str) -> Option<f32> {
@@ -731,7 +731,7 @@ impl GraphModule for GraphNoiseGen {
                 self.rng_state = value as u32;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 
@@ -781,18 +781,18 @@ impl GraphModule for GraphMonoMixer {
         // Add numbered inputs
         for i in 1..=self.input_count {
             inputs.push(PortDescriptor {
-                name: format!("in{}", i),
+                name: format!("in{i}"),
                 default_value: 0.0,
-                description: format!("Audio input {}", i),
+                description: format!("Audio input {i}"),
             });
         }
 
         // Add level CV inputs
         for i in 1..=self.input_count {
             inputs.push(PortDescriptor {
-                name: format!("level{}", i),
+                name: format!("level{i}"),
                 default_value: 1.0,
-                description: format!("Level control for input {}", i),
+                description: format!("Level control for input {i}"),
             });
         }
 
@@ -860,13 +860,13 @@ impl GraphModule for GraphMonoMixer {
                     self.levels[index - 1] = value;
                     Ok(())
                 } else {
-                    Err(anyhow!("Invalid level index: {}", index))
+                    Err(anyhow!("Invalid level index: {index}"))
                 }
             } else {
-                Err(anyhow!("Invalid level parameter: {}", name))
+                Err(anyhow!("Invalid level parameter: {name}"))
             }
         } else {
-            Err(anyhow!("Unknown parameter: {}", name))
+            Err(anyhow!("Unknown parameter: {name}"))
         }
     }
 
@@ -1010,7 +1010,7 @@ impl GraphModule for GraphEnvelope {
                 self.decay = value;
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 
