@@ -1,0 +1,44 @@
+# Polyrhythmic mixer demo
+# Two LFOs at different rates create complex rhythms
+# Bass note on slow rhythm, hi-hat on fast rhythm
+
+# Two LFOs with different timings
+bass_clock: lfo 1.1 
+hihat_clock: lfo 1.3
+
+# Bass sound: low sine wave
+bass_osc: osc sine 110   # Low A
+bass_env: envelope 0.02 0.6  # Punchy attack, longer decay
+bass_vca: vca 0.7
+
+# Hi-hat sound: filtered white noise
+noise: noise
+hihat_filter: filter
+hihat_env: envelope 0.001 0.08  # Very short for hi-hat
+hihat_vca: vca 0.3
+
+# Trigger envelopes with different clocks
+bass_env.gate <- bass_clock.gate
+hihat_env.gate <- hihat_clock.gate
+
+# Bass signal chain
+bass_vca.audio <- bass_osc.sine
+bass_vca.cv <- bass_env.out
+
+# Hi-hat signal chain
+hihat_filter.audio <- noise.white
+hihat_filter.cutoff <- 6000  # High-pass character
+hihat_filter.res <- 0.4
+hihat_vca.audio <- hihat_filter.hp
+hihat_vca.cv <- hihat_env.out
+
+# Mix both sounds together
+mix: mixer
+mix.in1 <- bass_vca.out
+mix.in2 <- hihat_vca.out
+
+# Adjust levels for good balance
+mix.level1 <- 0.8   # Bass prominent
+mix.level2 <- 0.6   # Hi-hat supporting
+
+out <- mix.out

@@ -243,6 +243,8 @@ Patch Syntax:
     clock: lfo 0.5              - Create LFO (0.5 Hz)
     gate: manual                - Create manual gate
     noise: noise                - Create noise generator
+    mix: mixer                  - Create 4-input mono mixer
+    mix: mixer 3                - Create 3-input mono mixer
     
 Connections:
     vcf.audio <- vco.sine       - Simple connection

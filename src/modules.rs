@@ -40,7 +40,7 @@ pub fn parse_module_type(s: &str) -> Result<ModuleType> {
         "filter" => Ok(ModuleType::Filter),
         "env" | "envelope" => Ok(ModuleType::Envelope),
         "vca" => Ok(ModuleType::Vca),
-        "mix" | "mixer" => Ok(ModuleType::Mixer),
+        "mix" | "mixer" | "mono_mixer" => Ok(ModuleType::Mixer),
         "out" | "output" => Ok(ModuleType::Output),
         "lfo" => Ok(ModuleType::Lfo),
         "gate" | "manual" => Ok(ModuleType::ManualGate),

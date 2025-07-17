@@ -131,6 +131,37 @@ div.in <- master_clock.gate
 seq.clock <- div.out
 ```
 
+### 6. Distortion & Character Modules
+
+#### Wavefolder
+```zim
+folder: wavefolder 0.5  # fold amount
+folder.in <- vco.sine
+folder.cv <- lfo.triangle  # CV control of fold amount
+vcf.audio <- folder.out
+```
+
+#### Waveshaper
+```zim
+shaper: waveshaper tanh  # tanh, clip, soft, tube, etc.
+shaper.in <- vco.saw
+shaper.drive <- 2.0  # drive amount
+shaper.cv <- env.out  # CV control of drive
+vca.audio <- shaper.out
+```
+
+#### Bitcrusher
+```zim
+crush: bitcrusher 8 8000  # 8 bits, 8kHz sample rate
+crush.in <- vco.square
+crush.bits <- 4  # Reduce to 4 bits
+crush.rate <- 4000  # Reduce to 4kHz
+# CV control
+crush.bits_cv <- lfo.sine * 8 + 8  # 4-12 bits
+crush.rate_cv <- lfo.triangle * 4000 + 4000  # 2-8kHz
+out <- crush.out
+```
+
 ## Implementation Priority
 
 1. **Phase 1** (Foundation):
@@ -144,7 +175,12 @@ seq.clock <- div.out
    - Sample & hold
    - Clock divider
 
-3. **Phase 3** (Advanced):
+3. **Phase 3** (Distortion & Character):
+   - Bitcrusher (most digital-native)
+   - Wavefolder (classic analog behavior)
+   - Waveshaper (multiple algorithms)
+
+4. **Phase 4** (Advanced):
    - Stereo mixer with panning
    - Attenuverter
    - Comparator

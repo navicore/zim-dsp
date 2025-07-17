@@ -1,0 +1,16 @@
+# Basic mixer test - combine oscillator and noise
+vco: osc sine 440
+noise: noise
+mix: mixer
+
+# Mix oscillator and noise
+mix.in1 <- vco.sine
+mix.in2 <- noise.white
+
+# Reduce noise level
+mix.level2 <- 0.2
+
+# Master level
+mix.master <- 0.5
+
+out <- mix.out

@@ -743,6 +743,152 @@ impl GraphModule for GraphNoiseGen {
     }
 }
 
+/// Mono mixer module - combines multiple audio sources
+pub struct GraphMonoMixer {
+    input_count: usize,
+    levels: Vec<f32>, // Individual input levels
+    master_level: f32,
+}
+
+impl GraphMonoMixer {
+    pub fn new(input_count: usize) -> Self {
+        Self {
+            input_count,
+            levels: vec![1.0; input_count], // Unity gain by default
+            master_level: 1.0,
+        }
+    }
+
+    pub fn new_4input() -> Self {
+        Self::new(4)
+    }
+}
+
+impl Default for GraphMonoMixer {
+    fn default() -> Self {
+        Self::new_4input()
+    }
+}
+
+impl GraphModule for GraphMonoMixer {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        let mut inputs = Vec::new();
+
+        // Add numbered inputs
+        for i in 1..=self.input_count {
+            inputs.push(PortDescriptor {
+                name: format!("in{}", i),
+                default_value: 0.0,
+                description: format!("Audio input {}", i),
+            });
+        }
+
+        // Add level CV inputs
+        for i in 1..=self.input_count {
+            inputs.push(PortDescriptor {
+                name: format!("level{}", i),
+                default_value: 1.0,
+                description: format!("Level control for input {}", i),
+            });
+        }
+
+        // Master level CV
+        inputs.push(PortDescriptor {
+            name: "master".to_string(),
+            default_value: 1.0,
+            description: "Master level control".to_string(),
+        });
+
+        inputs
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![PortDescriptor {
+            name: "out".to_string(),
+            default_value: 0.0,
+            description: "Mixed audio output".to_string(),
+        }]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let master_cv = inputs.get("master").map(|b| b.as_slice()).unwrap_or(&[]);
+        let out = outputs.get_mut("out").unwrap();
+
+        // Get all input buffers
+        let mut input_buffers = Vec::new();
+        let mut level_buffers = Vec::new();
+
+        for i in 1..=self.input_count {
+            let input = inputs.get(&format!("in{}", i)).map(|b| b.as_slice()).unwrap_or(&[]);
+            let level = inputs.get(&format!("level{}", i)).map(|b| b.as_slice()).unwrap_or(&[]);
+            input_buffers.push(input);
+            level_buffers.push(level);
+        }
+
+        // Mix all inputs
+        for i in 0..sample_count {
+            let mut mixed_sample = 0.0;
+
+            // Sum all inputs with their levels
+            for (input_idx, (input_buf, level_buf)) in
+                input_buffers.iter().zip(level_buffers.iter()).enumerate()
+            {
+                let input_sample = if i < input_buf.len() { input_buf[i] } else { 0.0 };
+                let level_sample =
+                    if i < level_buf.len() { level_buf[i] } else { self.levels[input_idx] };
+
+                mixed_sample += input_sample * level_sample;
+            }
+
+            // Apply master level
+            let master_sample = if i < master_cv.len() { master_cv[i] } else { self.master_level };
+            out[i] = mixed_sample * master_sample;
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        if name == "master" {
+            self.master_level = value;
+            Ok(())
+        } else if let Some(stripped) = name.strip_prefix("level") {
+            if let Ok(index) = stripped.parse::<usize>() {
+                if index > 0 && index <= self.input_count {
+                    self.levels[index - 1] = value;
+                    Ok(())
+                } else {
+                    Err(anyhow!("Invalid level index: {}", index))
+                }
+            } else {
+                Err(anyhow!("Invalid level parameter: {}", name))
+            }
+        } else {
+            Err(anyhow!("Unknown parameter: {}", name))
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        if name == "master" {
+            Some(self.master_level)
+        } else if let Some(stripped) = name.strip_prefix("level") {
+            if let Ok(index) = stripped.parse::<usize>() {
+                if index > 0 && index <= self.input_count {
+                    Some(self.levels[index - 1])
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+}
+
 /// Envelope generator
 pub struct GraphEnvelope {
     attack: f32,

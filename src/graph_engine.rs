@@ -2,8 +2,8 @@
 
 use crate::graph::{Connection, ConnectionExpr, GraphExecutor, ModuleInfo};
 use crate::graph_modules::{
-    GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphNoiseGen, GraphOscillator,
-    GraphStereoOutput, GraphVca,
+    GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphMonoMixer, GraphNoiseGen,
+    GraphOscillator, GraphStereoOutput, GraphVca,
 };
 use crate::modules::ModuleType;
 use crate::parser::{parse_line, Command};
@@ -239,7 +239,15 @@ impl GraphEngine {
             ModuleType::ManualGate => Box::new(GraphManualGate::new()),
             ModuleType::StereoOutput => Box::new(GraphStereoOutput::new()),
             ModuleType::Noise => Box::new(GraphNoiseGen::new()),
-            _ => return Err(anyhow!("Module type {:?} not yet implemented", module_type)),
+            ModuleType::Mixer => {
+                // Default to 4-input mixer, or use parameter if provided
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let input_count = params.first().copied().unwrap_or(4.0) as usize;
+                Box::new(GraphMonoMixer::new(input_count))
+            }
+            ModuleType::Output => {
+                return Err(anyhow!("Module type {:?} not yet implemented", module_type))
+            }
         };
 
         self.graph.lock().unwrap().add_module(name, module);
