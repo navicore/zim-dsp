@@ -247,6 +247,7 @@ Patch Syntax:
     mix: mixer 3                - Create 3-input mono mixer
     slew: slew_gen 0.1 0.1      - Create slew generator (rise/fall times)
     slew: slew_gen 0.2          - Create slew generator (same rise/fall)
+    seq: seq8                   - Create 8-step sequencer
     
 Connections:
     vcf.audio <- vco.sine       - Simple connection

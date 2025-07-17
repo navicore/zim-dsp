@@ -15,6 +15,7 @@ pub enum ModuleType {
     StereoOutput,
     Noise,
     Slew,
+    Seq8,
 }
 
 impl std::fmt::Display for ModuleType {
@@ -31,6 +32,7 @@ impl std::fmt::Display for ModuleType {
             Self::StereoOutput => write!(f, "stereo_out"),
             Self::Noise => write!(f, "noise"),
             Self::Slew => write!(f, "slew"),
+            Self::Seq8 => write!(f, "seq8"),
         }
     }
 }
@@ -48,6 +50,7 @@ pub fn parse_module_type(s: &str) -> Result<ModuleType> {
         "gate" | "manual" => Ok(ModuleType::ManualGate),
         "noise" | "noise_gen" => Ok(ModuleType::Noise),
         "slew" | "slew_gen" => Ok(ModuleType::Slew),
+        "seq8" | "sequencer" => Ok(ModuleType::Seq8),
         _ => Err(anyhow!("Unknown module type: {s}")),
     }
 }

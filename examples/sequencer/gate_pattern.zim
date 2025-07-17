@@ -1,0 +1,38 @@
+# 8-step sequencer with gate pattern
+# Some steps have gates disabled to create rhythmic patterns
+
+# Master clock
+clock: lfo 4  # 4 Hz clock for faster pattern
+
+# 8-step sequencer
+seq: seq8
+
+# Connect clock to sequencer
+seq.clock <- clock.gate
+
+# Create a rhythmic gate pattern
+seq.gate1 <- 1.0    # On
+seq.gate2 <- 0.0    # Off
+seq.gate3 <- 1.0    # On
+seq.gate4 <- 0.0    # Off
+seq.gate5 <- 1.0    # On
+seq.gate6 <- 1.0    # On
+seq.gate7 <- 0.0    # Off
+seq.gate8 <- 1.0    # On
+
+# Set gate length for shorter pulses
+seq.gate_length <- 0.05  # 50ms gates
+
+# Noise generator for percussion
+noise: noise
+env: envelope 0.005 0.05  # Short percussive envelope
+
+# Connect sequencer gate to envelope
+env.gate <- seq.gate
+
+# VCA for amplitude control
+vca: vca 0.6
+vca.audio <- noise.white
+vca.cv <- env.out
+
+out <- vca.out

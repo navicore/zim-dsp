@@ -3,7 +3,7 @@
 use crate::graph::{Connection, ConnectionExpr, GraphExecutor, ModuleInfo};
 use crate::graph_modules::{
     GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphMonoMixer, GraphNoiseGen,
-    GraphOscillator, GraphSlewGen, GraphStereoOutput, GraphVca,
+    GraphOscillator, GraphSeq8, GraphSlewGen, GraphStereoOutput, GraphVca,
 };
 use crate::modules::ModuleType;
 use crate::parser::{parse_line, Command};
@@ -251,6 +251,7 @@ impl GraphEngine {
                 let fall_time = params.get(1).copied().unwrap_or(rise_time);
                 Box::new(GraphSlewGen::new(rise_time, fall_time))
             }
+            ModuleType::Seq8 => Box::new(GraphSeq8::new()),
             ModuleType::Output => {
                 return Err(anyhow!("Module type {:?} not yet implemented", module_type))
             }
