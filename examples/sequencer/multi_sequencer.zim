@@ -1,0 +1,66 @@
+# Multi-Sequencer Generative Patch
+# Different length sequencers create complex, evolving patterns
+
+# Clock generator for all sequences
+clock: lfo 2.0
+
+# Signal distributor
+clockmult: mult
+
+# Connect clock to mult
+clockmult.input <- clock.gate
+
+# Three sequencers with different lengths
+seq3: seq8
+seq5: seq8  
+seq7: seq8
+
+# Set different lengths
+seq3.length <- 3
+seq5.length <- 5
+seq7.length <- 7
+
+# Connect clocks to all sequencers
+seq3.clock <- clockmult.out1
+seq5.clock <- clockmult.out2
+seq7.clock <- clockmult.out3
+
+# Set different step values for each sequencer
+seq3.step1 <- 220
+seq3.step2 <- 330
+seq3.step3 <- 440
+
+seq5.step1 <- 165
+seq5.step2 <- 196
+seq5.step3 <- 247
+seq5.step4 <- 294
+seq5.step5 <- 349
+
+seq7.step1 <- 131
+seq7.step2 <- 147
+seq7.step3 <- 175
+seq7.step4 <- 196
+seq7.step5 <- 220
+seq7.step6 <- 247
+seq7.step7 <- 294
+
+# Three oscillators
+osc1: osc saw
+osc2: osc square
+osc3: osc sine
+
+# Connect sequencers to oscillators
+osc1.freq <- seq3.cv
+osc2.freq <- seq5.cv
+osc3.freq <- seq7.cv
+
+# Mixer to combine all voices
+mixer: mix 3
+
+# Connect oscillators to mixer
+mixer.in1 <- osc1.sine * 0.3
+mixer.in2 <- osc2.square * 0.2
+mixer.in3 <- osc3.sine * 0.25
+
+# Output
+out <- mixer.out * 0.5

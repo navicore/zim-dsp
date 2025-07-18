@@ -2,7 +2,7 @@
 # Uses step values scaled to musical frequencies
 
 # Master clock
-clock: lfo 2  # 2 Hz clock
+clock: lfo 4  # 2 Hz clock
 
 # 8-step sequencer
 seq: seq8
@@ -28,7 +28,7 @@ vco: osc sine 220
 vco.freq <- seq.cv
 
 # Envelope triggered by sequencer gates
-env: envelope 0.01 0.15
+env: envelope 0.01 0.25
 env.gate <- seq.gate
 
 # VCA for amplitude control

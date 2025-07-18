@@ -1,0 +1,51 @@
+# Voltage Controlled Slew Demo
+# Classic Serge-style patch with sequencer controlling slew rates
+
+# Master clock
+clock: lfo 3.0
+
+# Melody sequencer - provides the notes
+melody_seq: seq8
+melody_seq.clock <- clock.gate
+melody_seq.step1 <- 220  # A3
+melody_seq.step2 <- 277  # C#4
+melody_seq.step3 <- 330  # E4
+melody_seq.step4 <- 294  # D4
+melody_seq.step5 <- 247  # B3
+melody_seq.step6 <- 196  # G3
+melody_seq.step7 <- 330  # E4
+melody_seq.step8 <- 277  # C#4
+
+# Slew rate sequencer - controls how fast/slow the portamento is
+slew_seq: seq8
+slew_seq.clock <- clock.gate
+slew_seq.step1 <- 0.05   # Fast slew
+slew_seq.step2 <- 0.3    # Medium slew
+slew_seq.step3 <- 0.8    # Slow slew
+slew_seq.step4 <- 0.02   # Very fast slew
+slew_seq.step5 <- 0.6    # Slow-medium slew
+slew_seq.step6 <- 0.1    # Fast-medium slew
+slew_seq.step7 <- 1.0    # Very slow slew
+slew_seq.step8 <- 0.05   # Fast slew
+
+# Voltage controlled slew limiter
+slew: slew 0.2 0.2  # Base times (will be overridden by CV)
+slew.in <- melody_seq.cv
+slew.rise <- slew_seq.cv
+slew.fall <- slew_seq.cv
+
+# Oscillator with slewed frequency control
+osc: osc saw
+osc.freq <- slew.out
+
+# Envelope for amplitude shaping
+env: envelope 0.01 0.15
+env.gate <- clock.gate
+
+# VCA
+vca: vca
+vca.audio <- osc.saw
+vca.cv <- env.out
+
+# Output
+out <- vca.out * 0.6

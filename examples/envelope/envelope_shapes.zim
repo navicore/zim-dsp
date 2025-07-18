@@ -1,0 +1,59 @@
+# Envelope Shape Demo
+# Contrasts different envelope shapes with distinct characteristics
+
+# Slow clock for triggering - gives time to hear each envelope fully
+trigger_clock: lfo 0.8
+
+# Clock divider to switch every 4 triggers
+switch_div: clockdiv 4
+switch_div.clock <- trigger_clock.gate
+
+# One oscillator
+osc: osc sine 440
+
+# Three very different envelope profiles to showcase shapes
+pluck_env: envelope 0.01 1.2      # Fast pluck: quick attack, long decay
+pad_env: envelope 0.8 0.8         # Slow pad: slow attack, medium decay  
+percussive_env: envelope 0.05 0.3 # Percussive: medium attack, quick decay
+
+# Set envelope shapes to highlight differences
+# Pluck: logarithmic decay for natural string-like behavior
+pluck_env.attack_shape <- 0   # Linear attack (fast)
+pluck_env.decay_shape <- 2    # Logarithmic decay (natural)
+
+# Pad: exponential attack for smooth fade-in
+pad_env.attack_shape <- 1     # Exponential attack (smooth)
+pad_env.decay_shape <- 1      # Exponential decay (smooth)
+
+# Percussive: logarithmic attack for sharp impact
+percussive_env.attack_shape <- 2  # Logarithmic attack (punchy)
+percussive_env.decay_shape <- 1   # Exponential decay (quick)
+
+# All envelopes triggered by same clock
+pluck_env.gate <- trigger_clock.gate
+pad_env.gate <- trigger_clock.gate
+percussive_env.gate <- trigger_clock.gate
+
+# VCAs to apply envelopes
+vca1: vca
+vca2: vca
+vca3: vca
+
+vca1.audio <- osc.sine
+vca1.cv <- pluck_env.out
+
+vca2.audio <- osc.sine
+vca2.cv <- pad_env.out
+
+vca3.audio <- osc.sine
+vca3.cv <- percussive_env.out
+
+# Switch cycles through the three envelope types
+switch: switch 3
+switch.clock <- switch_div.gate
+switch.in1 <- vca1.out
+switch.in2 <- vca2.out
+switch.in3 <- vca3.out
+
+# Output
+out <- switch.out * 0.8

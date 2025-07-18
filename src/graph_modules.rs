@@ -911,6 +911,10 @@ pub struct GraphSlewGen {
     target_value: f32,
     sample_rate: f32,
     curve_type: SlewCurve,
+    prev_target: f32, // Track previous target to detect new slew cycles
+    is_slewing: bool,
+    end_of_rise_gate: bool,
+    end_of_cycle_gate: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -929,6 +933,10 @@ impl GraphSlewGen {
             target_value: 0.0,
             sample_rate: 44100.0,
             curve_type: SlewCurve::Linear,
+            prev_target: 0.0,
+            is_slewing: false,
+            end_of_rise_gate: false,
+            end_of_cycle_gate: false,
         }
     }
 
@@ -997,11 +1005,23 @@ impl GraphModule for GraphSlewGen {
     }
 
     fn outputs(&self) -> Vec<PortDescriptor> {
-        vec![PortDescriptor {
-            name: "out".to_string(),
-            default_value: 0.0,
-            description: "Smoothed output signal".to_string(),
-        }]
+        vec![
+            PortDescriptor {
+                name: "out".to_string(),
+                default_value: 0.0,
+                description: "Smoothed output signal".to_string(),
+            },
+            PortDescriptor {
+                name: "eor".to_string(),
+                default_value: 0.0,
+                description: "End-of-rise gate (triggers when upward slew completes)".to_string(),
+            },
+            PortDescriptor {
+                name: "eoc".to_string(),
+                default_value: 0.0,
+                description: "End-of-cycle gate (triggers when any slew completes)".to_string(),
+            },
+        ]
     }
 
     fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
@@ -1010,27 +1030,50 @@ impl GraphModule for GraphSlewGen {
         let fall_cv = inputs.get("fall").map(|b| b.as_slice()).unwrap_or(&[]);
         let curve_cv = inputs.get("curve").map(|b| b.as_slice()).unwrap_or(&[]);
 
-        let out = outputs.get_mut("out").unwrap();
+        let [out, eor_out, eoc_out] = outputs.get_many_mut(["out", "eor", "eoc"]);
+        let out = out.unwrap();
+        let eor_out = eor_out.unwrap();
+        let eoc_out = eoc_out.unwrap();
 
         for i in 0..sample_count {
             // Get current parameter values
             let input_value = if i < input_signal.len() { input_signal[i] } else { 0.0 };
-            let rise_time = if i < rise_cv.len() { rise_cv[i] } else { self.rise_time };
-            let fall_time = if i < fall_cv.len() { fall_cv[i] } else { self.fall_time };
+
+            // For now, let's use CV values directly when available
+            let rise_time = if i < rise_cv.len() && rise_cv[i] != 0.1 {
+                rise_cv[i].max(0.001)
+            } else {
+                self.rise_time
+            };
+
+            let fall_time = if i < fall_cv.len() && fall_cv[i] != 0.1 {
+                fall_cv[i].max(0.001)
+            } else {
+                self.fall_time
+            };
 
             // Update curve type if CV changed
             if i < curve_cv.len() {
                 self.set_curve_from_param(curve_cv[i]);
             }
 
-            // Update target if input changed
-            if (input_value - self.target_value).abs() > 0.001 {
+            // Reset gate outputs
+            self.end_of_rise_gate = false;
+            self.end_of_cycle_gate = false;
+
+            // Check if target changed (new slew cycle starting)
+            if (input_value - self.prev_target).abs() > 0.001 {
                 self.target_value = input_value;
+                self.prev_target = input_value;
+                self.is_slewing = true;
             }
 
-            // Calculate slew
-            if (self.current_value - self.target_value).abs() > 0.001 {
-                let time_constant = if self.target_value > self.current_value {
+            // Check if we're currently slewing
+            let currently_slewing = (self.current_value - self.target_value).abs() > 0.001;
+
+            if currently_slewing {
+                let is_rising = self.target_value > self.current_value;
+                let time_constant = if is_rising {
                     rise_time.max(0.001) // Prevent division by zero
                 } else {
                     fall_time.max(0.001)
@@ -1051,10 +1094,22 @@ impl GraphModule for GraphSlewGen {
                 // Clamp to target if very close
                 if (self.current_value - self.target_value).abs() < 0.001 {
                     self.current_value = self.target_value;
+
+                    // We just finished slewing - trigger gates
+                    if self.is_slewing {
+                        self.end_of_cycle_gate = true;
+                        if is_rising {
+                            self.end_of_rise_gate = true;
+                        }
+                        self.is_slewing = false;
+                    }
                 }
             }
 
+            // Output the current value and gates
             out[i] = self.current_value;
+            eor_out[i] = if self.end_of_rise_gate { 1.0 } else { 0.0 };
+            eoc_out[i] = if self.end_of_cycle_gate { 1.0 } else { 0.0 };
         }
     }
 
@@ -1161,6 +1216,355 @@ impl GraphModule for GraphVisual {
     }
 }
 
+/// Multiple (mult) - 1 input to 4 outputs
+pub struct GraphMult {
+    // No internal state needed - just copies input to outputs
+}
+
+impl GraphMult {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Default for GraphMult {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphModule for GraphMult {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![PortDescriptor {
+            name: "input".to_string(),
+            default_value: 0.0,
+            description: "Input signal to multiply".to_string(),
+        }]
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "out1".to_string(),
+                default_value: 0.0,
+                description: "Output 1".to_string(),
+            },
+            PortDescriptor {
+                name: "out2".to_string(),
+                default_value: 0.0,
+                description: "Output 2".to_string(),
+            },
+            PortDescriptor {
+                name: "out3".to_string(),
+                default_value: 0.0,
+                description: "Output 3".to_string(),
+            },
+            PortDescriptor {
+                name: "out4".to_string(),
+                default_value: 0.0,
+                description: "Output 4".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let input_signal = inputs.get("input").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        let [out1, out2, out3, out4] = outputs.get_many_mut(["out1", "out2", "out3", "out4"]);
+        let out1 = out1.unwrap();
+        let out2 = out2.unwrap();
+        let out3 = out3.unwrap();
+        let out4 = out4.unwrap();
+
+        for i in 0..sample_count {
+            let input_value = if i < input_signal.len() { input_signal[i] } else { 0.0 };
+
+            // Copy input to all outputs
+            out1[i] = input_value;
+            out2[i] = input_value;
+            out3[i] = input_value;
+            out4[i] = input_value;
+        }
+    }
+
+    fn set_param(&mut self, _name: &str, _value: f32) -> Result<()> {
+        Err(anyhow!("Mult module has no parameters"))
+    }
+
+    fn get_param(&self, _name: &str) -> Option<f32> {
+        None
+    }
+}
+
+/// Sequential switch module - switches between multiple inputs based on clock
+pub struct GraphSwitch {
+    current_input: usize,
+    input_count: usize,
+    last_clock: f32,
+    switch_count: usize,
+}
+
+impl GraphSwitch {
+    pub fn new(input_count: usize) -> Self {
+        Self {
+            current_input: 0,
+            input_count: input_count.clamp(2, 8), // 2-8 inputs
+            last_clock: 0.0,
+            switch_count: 0,
+        }
+    }
+
+    pub fn set_input_count(&mut self, count: usize) {
+        self.input_count = count.clamp(2, 8);
+        if self.current_input >= self.input_count {
+            self.current_input = 0;
+        }
+    }
+}
+
+impl GraphModule for GraphSwitch {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        let mut inputs = vec![
+            PortDescriptor {
+                name: "clock".to_string(),
+                default_value: 0.0,
+                description: "Clock input to advance switch position".to_string(),
+            },
+            PortDescriptor {
+                name: "reset".to_string(),
+                default_value: 0.0,
+                description: "Reset switch to input 1".to_string(),
+            },
+        ];
+
+        // Add input ports dynamically based on input_count
+        for i in 1..=self.input_count {
+            inputs.push(PortDescriptor {
+                name: format!("in{i}"),
+                default_value: 0.0,
+                description: format!("Input {i}"),
+            });
+        }
+
+        inputs
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "out".to_string(),
+                default_value: 0.0,
+                description: "Selected input output".to_string(),
+            },
+            PortDescriptor {
+                name: "gate".to_string(),
+                default_value: 0.0,
+                description: "Gate output when switching".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let clock = inputs.get("clock").map(|b| b.as_slice()).unwrap_or(&[]);
+        let reset = inputs.get("reset").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        // Get all input signals
+        let mut input_signals = Vec::new();
+        for i in 1..=self.input_count {
+            let signal = inputs.get(&format!("in{i}")).map(|b| b.as_slice()).unwrap_or(&[]);
+            input_signals.push(signal);
+        }
+
+        let [out, gate_out] = outputs.get_many_mut(["out", "gate"]);
+        let out = out.unwrap();
+        let gate_out = gate_out.unwrap();
+
+        for i in 0..sample_count {
+            let clock_val = if i < clock.len() { clock[i] } else { 0.0 };
+            let reset_val = if i < reset.len() { reset[i] } else { 0.0 };
+
+            // Check for reset trigger
+            if reset_val > 0.5 {
+                self.current_input = 0;
+            }
+
+            // Check for clock rising edge
+            let rising_edge = clock_val > 0.5 && self.last_clock <= 0.5;
+            if rising_edge {
+                self.current_input = (self.current_input + 1) % self.input_count;
+                self.switch_count += 1;
+            }
+
+            // Output the selected input
+            let selected_signal = &input_signals[self.current_input];
+            out[i] = if i < selected_signal.len() { selected_signal[i] } else { 0.0 };
+
+            // Gate output - brief pulse when switching
+            gate_out[i] = if rising_edge { 1.0 } else { 0.0 };
+
+            // Update last_clock for next iteration
+            self.last_clock = clock_val;
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        match name {
+            "inputs" => {
+                self.set_input_count(value as usize);
+                Ok(())
+            }
+            "reset" => {
+                if value > 0.5 {
+                    self.current_input = 0;
+                }
+                Ok(())
+            }
+            _ => Err(anyhow!("Unknown parameter: {}", name)),
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        match name {
+            "inputs" => Some(self.input_count as f32),
+            "current" => Some(self.current_input as f32 + 1.0), // 1-indexed for user
+            "count" => Some(self.switch_count as f32),
+            _ => None,
+        }
+    }
+}
+
+/// Clock divider module - divides input clock by configurable ratio
+pub struct GraphClockDiv {
+    division: usize,
+    counter: usize,
+    last_clock: f32,
+    output_state: bool,
+}
+
+impl GraphClockDiv {
+    pub fn new(division: usize) -> Self {
+        Self {
+            division: division.max(1),
+            counter: 0,
+            last_clock: 0.0,
+            output_state: false,
+        }
+    }
+
+    pub fn set_division(&mut self, division: usize) {
+        self.division = division.max(1);
+        self.counter = 0;
+    }
+}
+
+impl GraphModule for GraphClockDiv {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "clock".to_string(),
+                default_value: 0.0,
+                description: "Input clock signal".to_string(),
+            },
+            PortDescriptor {
+                name: "reset".to_string(),
+                default_value: 0.0,
+                description: "Reset counter".to_string(),
+            },
+        ]
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "out".to_string(),
+                default_value: 0.0,
+                description: "Divided clock output".to_string(),
+            },
+            PortDescriptor {
+                name: "gate".to_string(),
+                default_value: 0.0,
+                description: "Gate output for divided clock".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let clock = inputs.get("clock").map(|b| b.as_slice()).unwrap_or(&[]);
+        let reset = inputs.get("reset").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        let [out, gate_out] = outputs.get_many_mut(["out", "gate"]);
+        let out = out.unwrap();
+        let gate_out = gate_out.unwrap();
+
+        for i in 0..sample_count {
+            let clock_val = if i < clock.len() { clock[i] } else { 0.0 };
+            let reset_val = if i < reset.len() { reset[i] } else { 0.0 };
+
+            // Check for reset trigger
+            if reset_val > 0.5 {
+                self.counter = 0;
+                self.output_state = false;
+            }
+
+            // Check for clock rising edge
+            let rising_edge = clock_val > 0.5 && self.last_clock <= 0.5;
+            if rising_edge {
+                self.counter += 1;
+                if self.counter >= self.division {
+                    self.counter = 0;
+                    self.output_state = !self.output_state;
+                }
+            }
+
+            // Output divided clock
+            out[i] = if self.output_state { 1.0 } else { 0.0 };
+
+            // Gate output - pulse on divided clock rising edge
+            gate_out[i] = if rising_edge && self.counter == 0 { 1.0 } else { 0.0 };
+
+            // Update last_clock for next iteration
+            self.last_clock = clock_val;
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        match name {
+            "division" | "div" => {
+                self.set_division(value as usize);
+                Ok(())
+            }
+            "reset" => {
+                if value > 0.5 {
+                    self.counter = 0;
+                    self.output_state = false;
+                }
+                Ok(())
+            }
+            _ => Err(anyhow!("Unknown parameter: {}", name)),
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        match name {
+            "division" | "div" => Some(self.division as f32),
+            "counter" => Some(self.counter as f32),
+            _ => None,
+        }
+    }
+}
+
 /// Envelope generator
 pub struct GraphEnvelope {
     attack: f32,
@@ -1170,6 +1574,8 @@ pub struct GraphEnvelope {
     current_value: f32,
     sample_rate: f32,
     last_gate: f32, // Track previous gate value for edge detection
+    attack_shape: EnvelopeShape,
+    decay_shape: EnvelopeShape,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1177,6 +1583,13 @@ enum EnvelopePhase {
     Idle,
     Attack,
     Decay,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EnvelopeShape {
+    Linear,
+    Exponential,
+    Logarithmic,
 }
 
 impl GraphEnvelope {
@@ -1189,6 +1602,23 @@ impl GraphEnvelope {
             current_value: 0.0,
             sample_rate: 44100.0,
             last_gate: 0.0,
+            attack_shape: EnvelopeShape::Linear,
+            decay_shape: EnvelopeShape::Linear,
+        }
+    }
+
+    /// Apply envelope shaping curve
+    fn apply_shape(progress: f32, shape: EnvelopeShape) -> f32 {
+        match shape {
+            EnvelopeShape::Linear => progress,
+            EnvelopeShape::Exponential => {
+                // Exponential curve: starts slow, accelerates
+                progress * progress
+            }
+            EnvelopeShape::Logarithmic => {
+                // Logarithmic curve: starts fast, decelerates
+                (progress * 2.0 - progress * progress).min(1.0)
+            }
         }
     }
 }
@@ -1236,7 +1666,8 @@ impl GraphModule for GraphEnvelope {
                 }
                 EnvelopePhase::Attack => {
                     if self.attack > 0.0 {
-                        self.current_value = (self.phase_time / self.attack).min(1.0);
+                        let linear_progress = (self.phase_time / self.attack).min(1.0);
+                        self.current_value = Self::apply_shape(linear_progress, self.attack_shape);
                         if self.phase_time >= self.attack {
                             self.phase = EnvelopePhase::Decay;
                             self.phase_time = 0.0;
@@ -1249,7 +1680,9 @@ impl GraphModule for GraphEnvelope {
                 }
                 EnvelopePhase::Decay => {
                     if self.decay > 0.0 {
-                        self.current_value = 1.0 - (self.phase_time / self.decay).min(1.0);
+                        let linear_progress = (self.phase_time / self.decay).min(1.0);
+                        let shaped_progress = Self::apply_shape(linear_progress, self.decay_shape);
+                        self.current_value = 1.0 - shaped_progress;
                         if self.phase_time >= self.decay {
                             self.phase = EnvelopePhase::Idle;
                             self.phase_time = 0.0;
@@ -1282,6 +1715,34 @@ impl GraphModule for GraphEnvelope {
                 self.decay = value;
                 Ok(())
             }
+            "attack_shape" => {
+                self.attack_shape = match value as i32 {
+                    0 => EnvelopeShape::Linear,
+                    1 => EnvelopeShape::Exponential,
+                    2 => EnvelopeShape::Logarithmic,
+                    _ => {
+                        return Err(anyhow!(
+                            "Invalid attack shape: {} (0=linear, 1=exp, 2=log)",
+                            value
+                        ))
+                    }
+                };
+                Ok(())
+            }
+            "decay_shape" => {
+                self.decay_shape = match value as i32 {
+                    0 => EnvelopeShape::Linear,
+                    1 => EnvelopeShape::Exponential,
+                    2 => EnvelopeShape::Logarithmic,
+                    _ => {
+                        return Err(anyhow!(
+                            "Invalid decay shape: {} (0=linear, 1=exp, 2=log)",
+                            value
+                        ))
+                    }
+                };
+                Ok(())
+            }
             _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
@@ -1290,6 +1751,16 @@ impl GraphModule for GraphEnvelope {
         match name {
             "attack" => Some(self.attack),
             "decay" => Some(self.decay),
+            "attack_shape" => Some(match self.attack_shape {
+                EnvelopeShape::Linear => 0.0,
+                EnvelopeShape::Exponential => 1.0,
+                EnvelopeShape::Logarithmic => 2.0,
+            }),
+            "decay_shape" => Some(match self.decay_shape {
+                EnvelopeShape::Linear => 0.0,
+                EnvelopeShape::Exponential => 1.0,
+                EnvelopeShape::Logarithmic => 2.0,
+            }),
             _ => None,
         }
     }
@@ -1301,10 +1772,13 @@ pub struct GraphSeq8 {
     gates: [bool; 8],
     current_step: usize,
     last_clock: f32,
+    last_reverse: f32,
     clock_count: usize,
     gate_length: f32,
     samples_since_clock: usize,
     sample_rate: f32,
+    forward_direction: bool,
+    sequence_length: usize,
 }
 
 impl GraphSeq8 {
@@ -1314,10 +1788,13 @@ impl GraphSeq8 {
             gates: [true; 8],                                // All gates on by default
             current_step: 0,
             last_clock: 0.0,
+            last_reverse: 0.0,
             clock_count: 0,
             gate_length: 0.1, // 100ms gate length
             samples_since_clock: 0,
             sample_rate: 44100.0,
+            forward_direction: true,
+            sequence_length: 8,
         }
     }
 
@@ -1348,6 +1825,16 @@ impl GraphModule for GraphSeq8 {
                 name: "reset".to_string(),
                 default_value: 0.0,
                 description: "Reset to step 1".to_string(),
+            },
+            PortDescriptor {
+                name: "reverse".to_string(),
+                default_value: 0.0,
+                description: "Reverse direction on rising edge".to_string(),
+            },
+            PortDescriptor {
+                name: "length".to_string(),
+                default_value: 8.0,
+                description: "Sequence length (1-8 steps)".to_string(),
             },
             PortDescriptor {
                 name: "gate_length".to_string(),
@@ -1400,6 +1887,8 @@ impl GraphModule for GraphSeq8 {
     fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
         let clock = inputs.get("clock").map(|b| b.as_slice()).unwrap_or(&[]);
         let reset = inputs.get("reset").map(|b| b.as_slice()).unwrap_or(&[]);
+        let reverse = inputs.get("reverse").map(|b| b.as_slice()).unwrap_or(&[]);
+        let _length_cv = inputs.get("length").map(|b| b.as_slice()).unwrap_or(&[]);
         let gate_length_cv = inputs.get("gate_length").map(|b| b.as_slice()).unwrap_or(&[]);
 
         // Get step values - use input connections if available, otherwise use parameter values
@@ -1424,8 +1913,12 @@ impl GraphModule for GraphSeq8 {
         for i in 0..sample_count {
             let current_clock = if i < clock.len() { clock[i] } else { 0.0 };
             let current_reset = if i < reset.len() { reset[i] } else { 0.0 };
+            let current_reverse = if i < reverse.len() { reverse[i] } else { 0.0 };
             let current_gate_length =
                 if i < gate_length_cv.len() { gate_length_cv[i] } else { self.gate_length };
+
+            // Use parameter value for sequence length (ignore CV input for now)
+            // TODO: Add proper input connection detection when we need CV control of length
 
             // Update gate length
             self.gate_length = current_gate_length.max(0.001);
@@ -1435,11 +1928,25 @@ impl GraphModule for GraphSeq8 {
                 self.current_step = 0;
                 self.samples_since_clock = 0;
                 self.clock_count = 0;
+                self.forward_direction = true;
+            }
+
+            // Check for reverse trigger (rising edge)
+            if current_reverse > 0.5 && self.last_reverse <= 0.5 {
+                self.forward_direction = !self.forward_direction;
             }
 
             // Check for clock trigger (rising edge)
             if current_clock > 0.5 && self.last_clock <= 0.5 {
-                self.current_step = (self.current_step + 1) % 8;
+                if self.forward_direction {
+                    self.current_step = (self.current_step + 1) % self.sequence_length;
+                } else {
+                    self.current_step = if self.current_step == 0 {
+                        self.sequence_length - 1
+                    } else {
+                        self.current_step - 1
+                    };
+                }
                 self.samples_since_clock = 0;
                 self.clock_count += 1;
             }
@@ -1459,12 +1966,17 @@ impl GraphModule for GraphSeq8 {
             gate_out[i] = if gate_active { 1.0 } else { 0.0 };
 
             self.last_clock = current_clock;
+            self.last_reverse = current_reverse;
             self.samples_since_clock += 1;
         }
     }
 
     fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
         match name {
+            "length" => {
+                self.sequence_length = (value as usize).clamp(1, 8);
+                Ok(())
+            }
             "gate_length" => {
                 self.gate_length = value.max(0.001);
                 Ok(())
@@ -1497,6 +2009,7 @@ impl GraphModule for GraphSeq8 {
 
     fn get_param(&self, name: &str) -> Option<f32> {
         match name {
+            "length" => Some(self.sequence_length as f32),
             "gate_length" => Some(self.gate_length),
             _ => {
                 // Check for step parameters
