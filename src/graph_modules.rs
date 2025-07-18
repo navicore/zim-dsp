@@ -1307,6 +1307,7 @@ pub struct GraphSeq8 {
     samples_since_clock: usize,
     sample_rate: f32,
     forward_direction: bool,
+    sequence_length: usize,
 }
 
 impl GraphSeq8 {
@@ -1322,6 +1323,7 @@ impl GraphSeq8 {
             samples_since_clock: 0,
             sample_rate: 44100.0,
             forward_direction: true,
+            sequence_length: 8,
         }
     }
 
@@ -1357,6 +1359,11 @@ impl GraphModule for GraphSeq8 {
                 name: "reverse".to_string(),
                 default_value: 0.0,
                 description: "Reverse direction on rising edge".to_string(),
+            },
+            PortDescriptor {
+                name: "length".to_string(),
+                default_value: 8.0,
+                description: "Sequence length (1-8 steps)".to_string(),
             },
             PortDescriptor {
                 name: "gate_length".to_string(),
@@ -1410,6 +1417,7 @@ impl GraphModule for GraphSeq8 {
         let clock = inputs.get("clock").map(|b| b.as_slice()).unwrap_or(&[]);
         let reset = inputs.get("reset").map(|b| b.as_slice()).unwrap_or(&[]);
         let reverse = inputs.get("reverse").map(|b| b.as_slice()).unwrap_or(&[]);
+        let _length_cv = inputs.get("length").map(|b| b.as_slice()).unwrap_or(&[]);
         let gate_length_cv = inputs.get("gate_length").map(|b| b.as_slice()).unwrap_or(&[]);
 
         // Get step values - use input connections if available, otherwise use parameter values
@@ -1438,6 +1446,9 @@ impl GraphModule for GraphSeq8 {
             let current_gate_length =
                 if i < gate_length_cv.len() { gate_length_cv[i] } else { self.gate_length };
 
+            // Use parameter value for sequence length (ignore CV input for now)
+            // TODO: Add proper input connection detection when we need CV control of length
+
             // Update gate length
             self.gate_length = current_gate_length.max(0.001);
 
@@ -1457,9 +1468,13 @@ impl GraphModule for GraphSeq8 {
             // Check for clock trigger (rising edge)
             if current_clock > 0.5 && self.last_clock <= 0.5 {
                 if self.forward_direction {
-                    self.current_step = (self.current_step + 1) % 8;
+                    self.current_step = (self.current_step + 1) % self.sequence_length;
                 } else {
-                    self.current_step = if self.current_step == 0 { 7 } else { self.current_step - 1 };
+                    self.current_step = if self.current_step == 0 {
+                        self.sequence_length - 1
+                    } else {
+                        self.current_step - 1
+                    };
                 }
                 self.samples_since_clock = 0;
                 self.clock_count += 1;
@@ -1487,6 +1502,10 @@ impl GraphModule for GraphSeq8 {
 
     fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
         match name {
+            "length" => {
+                self.sequence_length = (value as usize).clamp(1, 8);
+                Ok(())
+            }
             "gate_length" => {
                 self.gate_length = value.max(0.001);
                 Ok(())
@@ -1519,6 +1538,7 @@ impl GraphModule for GraphSeq8 {
 
     fn get_param(&self, name: &str) -> Option<f32> {
         match name {
+            "length" => Some(self.sequence_length as f32),
             "gate_length" => Some(self.gate_length),
             _ => {
                 // Check for step parameters
