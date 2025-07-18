@@ -37,3 +37,4 @@ coverage.xml
 # Temporary files
 *.tmp
 .temp/
+test*.zim

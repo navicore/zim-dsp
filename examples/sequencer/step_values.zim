@@ -1,8 +1,8 @@
 # 8-step sequencer with custom step values
-# Demonstrates setting individual step values
+# Demonstrates setting individual step values for chord progression
 
 # Master clock
-clock: lfo 1  # 1 Hz clock
+clock: lfo 1.5  # 1.5 Hz clock
 
 # 8-step sequencer
 seq: seq8
@@ -10,34 +10,29 @@ seq: seq8
 # Connect clock to sequencer
 seq.clock <- clock.gate
 
-# Set custom step values (0-1 range)
-seq.step1 <- 0.0    # C
-seq.step2 <- 0.25   # E
-seq.step3 <- 0.5    # G
-seq.step4 <- 0.75   # B
-seq.step5 <- 1.0    # High C
-seq.step6 <- 0.5    # G
-seq.step7 <- 0.25   # E
-seq.step8 <- 0.0    # C
+# Set custom step values as frequencies for C major arpeggio
+seq.step1 <- 262    # C4
+seq.step2 <- 330    # E4
+seq.step3 <- 392    # G4
+seq.step4 <- 523    # C5
+seq.step5 <- 392    # G4
+seq.step6 <- 330    # E4
+seq.step7 <- 262    # C4
+seq.step8 <- 196    # G3
 
-# Oscillator to test the sequence
-vco: osc saw 220
+# Oscillator controlled by sequence
+vco: osc triangle 260
 
-# Use step values to create a melody
-# For now, just output the raw CV values
-vca: vca 0.5
-vca.audio <- vco.saw
-vca.cv <- seq.cv
+# Connect sequencer CV to oscillator frequency
+vco.freq <- seq.cv
 
 # Envelope for gating
-env: envelope 0.01 0.2
+env: envelope 0.02 0.3
 env.gate <- seq.gate
 
-# Mix the melodic content with the envelope
-mixer: mixer
-mixer.in1 <- vca.out
-mixer.in2 <- seq.cv  # Raw CV output for testing
-mixer.level1 <- 0.7
-mixer.level2 <- 0.3
+# VCA for amplitude control
+vca: vca 0.6
+vca.audio <- vco.triangle
+vca.cv <- env.out
 
-out <- mixer.out
+out <- vca.out

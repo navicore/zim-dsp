@@ -12,7 +12,7 @@
 #![allow(clippy::module_name_repetitions)]
 #![allow(dead_code)] // Many parts are not yet used but will be
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 
 /// Describes a module input or output port
@@ -245,6 +245,18 @@ impl GraphExecutor {
 
     pub fn get_module_mut(&mut self, name: &str) -> Option<&mut Box<dyn GraphModule>> {
         self.modules.get_mut(name)
+    }
+
+    pub fn set_module_param(
+        &mut self,
+        module_name: &str,
+        param_name: &str,
+        value: f32,
+    ) -> Result<()> {
+        self.modules.get_mut(module_name).map_or_else(
+            || Err(anyhow!("Module '{module_name}' not found")),
+            |module| module.set_param(param_name, value),
+        )
     }
 
     /// Get information about a module's ports

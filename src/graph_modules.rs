@@ -31,6 +31,11 @@ impl GraphModule for GraphOscillator {
     fn inputs(&self) -> Vec<PortDescriptor> {
         vec![
             PortDescriptor {
+                name: "freq".to_string(),
+                default_value: 0.0,
+                description: "Frequency control input (Hz, 0 = use base freq)".to_string(),
+            },
+            PortDescriptor {
                 name: "fm".to_string(),
                 default_value: 0.0,
                 description: "Frequency modulation input".to_string(),
@@ -69,6 +74,7 @@ impl GraphModule for GraphOscillator {
     }
 
     fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let freq_input = inputs.get("freq").map(|b| b.as_slice()).unwrap_or(&[]);
         let fm_input = inputs.get("fm").map(|b| b.as_slice()).unwrap_or(&[]);
         let sync_input = inputs.get("sync").map(|b| b.as_slice()).unwrap_or(&[]);
 
@@ -85,9 +91,17 @@ impl GraphModule for GraphOscillator {
                 self.phase = 0.0;
             }
 
-            // Calculate frequency with FM
+            // Calculate frequency with direct freq control and FM
+            let freq_cv = if i < freq_input.len() { freq_input[i] } else { 0.0 };
             let fm_amount = if i < fm_input.len() { fm_input[i] } else { 0.0 };
-            let instant_freq = self.frequency * (1.0 + fm_amount);
+
+            // Use freq CV if connected and > 0, otherwise use base frequency
+            // Check if freq input is actually connected (not just using default buffer)
+            let has_freq_connection =
+                inputs.get("freq").is_some() && !inputs.get("freq").unwrap().is_empty();
+            let base_freq =
+                if has_freq_connection && freq_cv > 0.0 { freq_cv } else { self.frequency };
+            let instant_freq = base_freq * (1.0 + fm_amount);
 
             // Generate waveforms
             sine_out[i] = (self.phase * 2.0 * std::f32::consts::PI).sin();
@@ -1076,6 +1090,77 @@ impl GraphModule for GraphSlewGen {
     }
 }
 
+/// Visual debug module - prints input values to stdout
+pub struct GraphVisual {
+    last_value: f32,
+    sample_count: usize,
+    sample_rate: f32,
+    print_interval: usize, // Print every N samples
+}
+
+impl GraphVisual {
+    pub fn new() -> Self {
+        Self {
+            last_value: f32::NAN,
+            sample_count: 0,
+            sample_rate: 44100.0,
+            print_interval: 4410, // Print 10 times per second at 44.1kHz
+        }
+    }
+}
+
+impl Default for GraphVisual {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphModule for GraphVisual {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![PortDescriptor {
+            name: "input".to_string(),
+            default_value: 0.0,
+            description: "Signal to monitor".to_string(),
+        }]
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![] // No outputs - just prints to console
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, _outputs: &mut PortBuffers, sample_count: usize) {
+        let input_signal = inputs.get("input").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        for i in 0..sample_count {
+            let current_value = if i < input_signal.len() { input_signal[i] } else { 0.0 };
+
+            // Print when value changes significantly or at regular intervals
+            let value_changed = (current_value - self.last_value).abs() > 0.001;
+            let time_to_print = self.sample_count % self.print_interval == 0;
+
+            if value_changed || time_to_print {
+                let time_seconds = self.sample_count as f32 / self.sample_rate;
+                println!("[VISUAL] t={time_seconds:.2}s: {current_value:.3}");
+                self.last_value = current_value;
+            }
+
+            self.sample_count += 1;
+        }
+    }
+
+    fn set_param(&mut self, _name: &str, _value: f32) -> Result<()> {
+        Err(anyhow!("Visual module has no parameters"))
+    }
+
+    fn get_param(&self, _name: &str) -> Option<f32> {
+        None
+    }
+}
+
 /// Envelope generator
 pub struct GraphEnvelope {
     attack: f32,
@@ -1317,22 +1402,16 @@ impl GraphModule for GraphSeq8 {
         let reset = inputs.get("reset").map(|b| b.as_slice()).unwrap_or(&[]);
         let gate_length_cv = inputs.get("gate_length").map(|b| b.as_slice()).unwrap_or(&[]);
 
-        // Get step values
-        let mut step_values = [0.0; 8];
-        for (i, value) in step_values.iter_mut().enumerate() {
-            if let Some(buffer) = inputs.get(&format!("step{}", i + 1)) {
-                if let Some(input_value) = buffer.as_slice().first() {
-                    *value = *input_value;
-                }
-            }
-        }
+        // Get step values - use input connections if available, otherwise use parameter values
+        let step_values = self.steps; // Use parameter values directly
+                                      // TODO: Add proper input connection detection when we need CV inputs to step values
 
-        // Get gate enables
-        let mut gate_enables = [true; 8];
+        // Get gate enables - use input connections if available, otherwise use parameter values
+        let mut gate_enables = self.gates; // Start with parameter values
         for (i, enable) in gate_enables.iter_mut().enumerate() {
             if let Some(buffer) = inputs.get(&format!("gate{}", i + 1)) {
                 if let Some(value) = buffer.as_slice().first() {
-                    *enable = *value > 0.5;
+                    *enable = *value > 0.5; // Override with input if connected
                 }
             }
         }
@@ -1365,18 +1444,18 @@ impl GraphModule for GraphSeq8 {
                 self.clock_count += 1;
             }
 
-            // Update step values and gate enables
-            self.steps = step_values;
-            self.gates = gate_enables;
+            // Note: step_values and gate_enables are local arrays that combine
+            // parameter values with any connected inputs. We don't update the
+            // module's internal arrays here to preserve parameter settings.
 
             // Generate outputs
-            cv_out[i] = self.steps[self.current_step];
+            cv_out[i] = step_values[self.current_step];
             step_out[i] = self.current_step as f32;
 
             // Gate output depends on gate enable and timing
             let gate_samples = self.get_gate_length_samples();
             let gate_active =
-                self.gates[self.current_step] && self.samples_since_clock < gate_samples;
+                gate_enables[self.current_step] && self.samples_since_clock < gate_samples;
             gate_out[i] = if gate_active { 1.0 } else { 0.0 };
 
             self.last_clock = current_clock;

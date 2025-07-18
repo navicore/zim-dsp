@@ -1,0 +1,39 @@
+# Melodic sequencer - CV controls oscillator pitch
+# Uses step values scaled to musical frequencies
+
+# Master clock
+clock: lfo 2  # 2 Hz clock
+
+# 8-step sequencer
+seq: seq8
+
+# Connect clock to sequencer
+seq.clock <- clock.gate
+
+# Set step values to specific frequencies
+# Using actual Hz values for clear melodic content
+seq.step1 <- 220    # A3
+seq.step2 <- 246    # B3
+seq.step3 <- 277    # C#4
+seq.step4 <- 311    # D#4
+seq.step5 <- 330    # E4
+seq.step6 <- 277    # C#4
+seq.step7 <- 246    # B3
+seq.step8 <- 220    # A3
+
+# Oscillator controlled by sequencer CV
+vco: osc sine 220
+
+# Connect sequencer CV directly to frequency
+vco.freq <- seq.cv
+
+# Envelope triggered by sequencer gates
+env: envelope 0.01 0.15
+env.gate <- seq.gate
+
+# VCA for amplitude control
+vca: vca 0.6
+vca.audio <- vco.sine
+vca.cv <- env.out
+
+out <- vca.out

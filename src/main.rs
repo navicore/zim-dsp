@@ -253,6 +253,7 @@ Connections:
     vcf.audio <- vco.sine       - Simple connection
     vca.cv <- env.output        - Control voltage
     env.gate <- clock.gate      - Clock triggers envelope
+    vco.freq <- seq.cv          - Sequencer controls pitch
     vcf.cutoff <- lfo.sine * 2000 + 1000  - Scaled/offset
     out <- vca.out              - Mono to stereo output
     out.left <- vca1.out        - Left channel only

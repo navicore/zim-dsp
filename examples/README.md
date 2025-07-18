@@ -39,8 +39,9 @@ Examples are organized by the primary module being demonstrated:
 - `basic_portamento.zim` - Basic portamento effect using slew
 
 ## Sequencer Examples (`sequencer/`)
-- `basic_seq.zim` - Basic 8-step sequencer with clock and gate outputs
-- `step_values.zim` - Setting custom step values for melodic sequences
+- `basic_seq.zim` - Basic 8-step sequencer controlling oscillator pitch
+- `melodic_sequence.zim` - Musical sequence with pitch control
+- `step_values.zim` - C major arpeggio with custom step frequencies
 - `gate_pattern.zim` - Creating rhythmic patterns with gate enables
 - `reset_demo.zim` - Using reset to create different phrase lengths
 
