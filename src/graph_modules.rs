@@ -1090,6 +1090,77 @@ impl GraphModule for GraphSlewGen {
     }
 }
 
+/// Visual debug module - prints input values to stdout
+pub struct GraphVisual {
+    last_value: f32,
+    sample_count: usize,
+    sample_rate: f32,
+    print_interval: usize, // Print every N samples
+}
+
+impl GraphVisual {
+    pub fn new() -> Self {
+        Self {
+            last_value: f32::NAN,
+            sample_count: 0,
+            sample_rate: 44100.0,
+            print_interval: 4410, // Print 10 times per second at 44.1kHz
+        }
+    }
+}
+
+impl Default for GraphVisual {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphModule for GraphVisual {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![PortDescriptor {
+            name: "input".to_string(),
+            default_value: 0.0,
+            description: "Signal to monitor".to_string(),
+        }]
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![] // No outputs - just prints to console
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, _outputs: &mut PortBuffers, sample_count: usize) {
+        let input_signal = inputs.get("input").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        for i in 0..sample_count {
+            let current_value = if i < input_signal.len() { input_signal[i] } else { 0.0 };
+
+            // Print when value changes significantly or at regular intervals
+            let value_changed = (current_value - self.last_value).abs() > 0.001;
+            let time_to_print = self.sample_count % self.print_interval == 0;
+
+            if value_changed || time_to_print {
+                let time_seconds = self.sample_count as f32 / self.sample_rate;
+                println!("[VISUAL] t={:.2}s: {:.3}", time_seconds, current_value);
+                self.last_value = current_value;
+            }
+
+            self.sample_count += 1;
+        }
+    }
+
+    fn set_param(&mut self, _name: &str, _value: f32) -> Result<()> {
+        Err(anyhow!("Visual module has no parameters"))
+    }
+
+    fn get_param(&self, _name: &str) -> Option<f32> {
+        None
+    }
+}
+
 /// Envelope generator
 pub struct GraphEnvelope {
     attack: f32,
@@ -1332,18 +1403,8 @@ impl GraphModule for GraphSeq8 {
         let gate_length_cv = inputs.get("gate_length").map(|b| b.as_slice()).unwrap_or(&[]);
 
         // Get step values - use input connections if available, otherwise use parameter values
-        let mut step_values = self.steps; // Start with parameter values
-        for (i, value) in step_values.iter_mut().enumerate() {
-            let port_name = format!("step{}", i + 1);
-            if let Some(buffer) = inputs.get(&port_name) {
-                // Only override if there's actually a connection (buffer not empty/default)
-                if !buffer.is_empty() && buffer.as_slice().iter().any(|&x| x != 0.0) {
-                    if let Some(input_value) = buffer.as_slice().first() {
-                        *value = *input_value; // Override with input if connected
-                    }
-                }
-            }
-        }
+        let step_values = self.steps; // Use parameter values directly
+                                      // TODO: Add proper input connection detection when we need CV inputs to step values
 
         // Get gate enables - use input connections if available, otherwise use parameter values
         let mut gate_enables = self.gates; // Start with parameter values
@@ -1413,7 +1474,14 @@ impl GraphModule for GraphSeq8 {
                 if let Some(step_str) = name.strip_prefix("step") {
                     if let Ok(step_num) = step_str.parse::<usize>() {
                         if (1..=8).contains(&step_num) {
+                            println!(
+                                "[DEBUG] Setting step{} = {} (index {})",
+                                step_num,
+                                value,
+                                step_num - 1
+                            );
                             self.steps[step_num - 1] = value;
+                            println!("[DEBUG] steps array is now: {:?}", self.steps);
                             return Ok(());
                         }
                     }
