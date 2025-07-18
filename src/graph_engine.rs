@@ -26,7 +26,14 @@ pub struct GraphEngine {
     has_stereo_output: bool,
 }
 
+impl Default for GraphEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GraphEngine {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             graph: Arc::new(Mutex::new(GraphExecutor::new())),
@@ -40,6 +47,10 @@ impl GraphEngine {
     }
 
     /// Load a patch from text content
+    /// Load a patch from text content
+    ///
+    /// # Errors
+    /// Returns an error if any line in the patch fails to parse or process
     pub fn load_patch(&mut self, patch_content: &str) -> Result<()> {
         self.clear_patch();
 
@@ -57,6 +68,10 @@ impl GraphEngine {
     }
 
     /// Process a line of DSL code
+    /// Process a line of DSL code
+    ///
+    /// # Errors
+    /// Returns an error if the line cannot be parsed or processed
     pub fn process_line(&mut self, line: &str) -> Result<String> {
         // First try parsing with the existing parser
         match parse_line(line) {
@@ -277,6 +292,10 @@ impl GraphEngine {
     }
 
     /// Start audio processing
+    /// Start audio processing
+    ///
+    /// # Errors
+    /// Returns an error if the audio system cannot be initialized
     pub fn start(&mut self) -> Result<()> {
         if self.is_running {
             return Ok(());
@@ -356,6 +375,10 @@ impl GraphEngine {
     }
 
     /// Clear the patch
+    /// Clear the patch
+    ///
+    /// # Panics
+    /// Panics if the graph mutex is poisoned
     pub fn clear_patch(&mut self) {
         self.stop();
         *self.graph.lock().unwrap() = GraphExecutor::new();
@@ -365,31 +388,60 @@ impl GraphEngine {
     }
 
     /// List all modules
+    /// List all modules
+    ///
+    /// # Panics
+    /// Panics if the graph mutex is poisoned
+    #[must_use]
     pub fn list_modules(&self) -> Vec<String> {
         self.graph.lock().unwrap().list_modules()
     }
 
     /// Inspect a module
+    /// Inspect a module
+    ///
+    /// # Panics
+    /// Panics if the graph mutex is poisoned
+    #[must_use]
     pub fn inspect_module(&self, name: &str) -> Option<ModuleInfo> {
         self.graph.lock().unwrap().inspect_module(name)
     }
 
     /// Validate all connections
+    /// Validate all connections
+    ///
+    /// # Panics
+    /// Panics if the graph mutex is poisoned
+    #[must_use]
     pub fn validate_connections(&self) -> Vec<String> {
         self.graph.lock().unwrap().validate_connections()
     }
 
     /// Activate all manual gate modules
+    /// Activate all manual gate modules
+    ///
+    /// # Panics
+    /// Panics if the graph mutex is poisoned
+    #[must_use]
     pub fn activate_manual_gates(&self) -> usize {
         self.graph.lock().unwrap().activate_manual_gates()
     }
 
     /// Release all manual gate modules
+    /// Release all manual gate modules
+    ///
+    /// # Panics
+    /// Panics if the graph mutex is poisoned
+    #[must_use]
     pub fn release_manual_gates(&self) -> usize {
         self.graph.lock().unwrap().release_manual_gates()
     }
 
     /// Build an audio stream for the given sample format
+    /// Build an audio stream for the given sample format
+    ///
+    /// # Errors
+    /// Returns an error if the audio stream cannot be created
     fn build_stream<T>(
         device: &cpal::Device,
         config: &cpal::StreamConfig,

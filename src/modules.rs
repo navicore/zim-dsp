@@ -46,6 +46,9 @@ impl std::fmt::Display for ModuleType {
 }
 
 /// Parse module type from string
+///
+/// # Errors
+/// Returns an error if the string doesn't match any known module type
 pub fn parse_module_type(s: &str) -> Result<ModuleType> {
     match s {
         "osc" => Ok(ModuleType::Oscillator),

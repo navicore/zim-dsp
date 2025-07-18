@@ -34,6 +34,12 @@ impl std::fmt::Display for Command {
 }
 
 /// Parse a single line of patch notation
+///
+/// # Errors
+/// Returns an error if the line cannot be parsed as a valid command
+///
+/// # Panics
+/// Panics if arrow position is found but subsequent parsing fails (internal logic error)
 pub fn parse_line(line: &str) -> Result<Command> {
     let line = line.trim();
 
