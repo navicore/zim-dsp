@@ -1144,7 +1144,7 @@ impl GraphModule for GraphVisual {
 
             if value_changed || time_to_print {
                 let time_seconds = self.sample_count as f32 / self.sample_rate;
-                println!("[VISUAL] t={:.2}s: {:.3}", time_seconds, current_value);
+                println!("[VISUAL] t={time_seconds:.2}s: {current_value:.3}");
                 self.last_value = current_value;
             }
 
