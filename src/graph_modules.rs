@@ -1301,10 +1301,12 @@ pub struct GraphSeq8 {
     gates: [bool; 8],
     current_step: usize,
     last_clock: f32,
+    last_reverse: f32,
     clock_count: usize,
     gate_length: f32,
     samples_since_clock: usize,
     sample_rate: f32,
+    forward_direction: bool,
 }
 
 impl GraphSeq8 {
@@ -1314,10 +1316,12 @@ impl GraphSeq8 {
             gates: [true; 8],                                // All gates on by default
             current_step: 0,
             last_clock: 0.0,
+            last_reverse: 0.0,
             clock_count: 0,
             gate_length: 0.1, // 100ms gate length
             samples_since_clock: 0,
             sample_rate: 44100.0,
+            forward_direction: true,
         }
     }
 
@@ -1348,6 +1352,11 @@ impl GraphModule for GraphSeq8 {
                 name: "reset".to_string(),
                 default_value: 0.0,
                 description: "Reset to step 1".to_string(),
+            },
+            PortDescriptor {
+                name: "reverse".to_string(),
+                default_value: 0.0,
+                description: "Reverse direction on rising edge".to_string(),
             },
             PortDescriptor {
                 name: "gate_length".to_string(),
@@ -1400,6 +1409,7 @@ impl GraphModule for GraphSeq8 {
     fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
         let clock = inputs.get("clock").map(|b| b.as_slice()).unwrap_or(&[]);
         let reset = inputs.get("reset").map(|b| b.as_slice()).unwrap_or(&[]);
+        let reverse = inputs.get("reverse").map(|b| b.as_slice()).unwrap_or(&[]);
         let gate_length_cv = inputs.get("gate_length").map(|b| b.as_slice()).unwrap_or(&[]);
 
         // Get step values - use input connections if available, otherwise use parameter values
@@ -1424,6 +1434,7 @@ impl GraphModule for GraphSeq8 {
         for i in 0..sample_count {
             let current_clock = if i < clock.len() { clock[i] } else { 0.0 };
             let current_reset = if i < reset.len() { reset[i] } else { 0.0 };
+            let current_reverse = if i < reverse.len() { reverse[i] } else { 0.0 };
             let current_gate_length =
                 if i < gate_length_cv.len() { gate_length_cv[i] } else { self.gate_length };
 
@@ -1435,11 +1446,21 @@ impl GraphModule for GraphSeq8 {
                 self.current_step = 0;
                 self.samples_since_clock = 0;
                 self.clock_count = 0;
+                self.forward_direction = true;
+            }
+
+            // Check for reverse trigger (rising edge)
+            if current_reverse > 0.5 && self.last_reverse <= 0.5 {
+                self.forward_direction = !self.forward_direction;
             }
 
             // Check for clock trigger (rising edge)
             if current_clock > 0.5 && self.last_clock <= 0.5 {
-                self.current_step = (self.current_step + 1) % 8;
+                if self.forward_direction {
+                    self.current_step = (self.current_step + 1) % 8;
+                } else {
+                    self.current_step = if self.current_step == 0 { 7 } else { self.current_step - 1 };
+                }
                 self.samples_since_clock = 0;
                 self.clock_count += 1;
             }
@@ -1459,6 +1480,7 @@ impl GraphModule for GraphSeq8 {
             gate_out[i] = if gate_active { 1.0 } else { 0.0 };
 
             self.last_clock = current_clock;
+            self.last_reverse = current_reverse;
             self.samples_since_clock += 1;
         }
     }
