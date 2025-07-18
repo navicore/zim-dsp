@@ -2,8 +2,9 @@
 
 use crate::graph::{Connection, ConnectionExpr, GraphExecutor, ModuleInfo};
 use crate::graph_modules::{
-    GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphMonoMixer, GraphNoiseGen,
-    GraphOscillator, GraphSeq8, GraphSlewGen, GraphStereoOutput, GraphVca, GraphVisual,
+    GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphMonoMixer, GraphMult,
+    GraphNoiseGen, GraphOscillator, GraphSeq8, GraphSlewGen, GraphStereoOutput, GraphVca,
+    GraphVisual,
 };
 use crate::modules::ModuleType;
 use crate::parser::{parse_line, Command};
@@ -253,6 +254,7 @@ impl GraphEngine {
             }
             ModuleType::Seq8 => Box::new(GraphSeq8::new()),
             ModuleType::Visual => Box::new(GraphVisual::new()),
+            ModuleType::Mult => Box::new(GraphMult::new()),
             ModuleType::Output => {
                 return Err(anyhow!("Module type {:?} not yet implemented", module_type))
             }

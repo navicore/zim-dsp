@@ -1161,6 +1161,90 @@ impl GraphModule for GraphVisual {
     }
 }
 
+/// Multiple (mult) - 1 input to 4 outputs
+pub struct GraphMult {
+    // No internal state needed - just copies input to outputs
+}
+
+impl GraphMult {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Default for GraphMult {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphModule for GraphMult {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![PortDescriptor {
+            name: "input".to_string(),
+            default_value: 0.0,
+            description: "Input signal to multiply".to_string(),
+        }]
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "out1".to_string(),
+                default_value: 0.0,
+                description: "Output 1".to_string(),
+            },
+            PortDescriptor {
+                name: "out2".to_string(),
+                default_value: 0.0,
+                description: "Output 2".to_string(),
+            },
+            PortDescriptor {
+                name: "out3".to_string(),
+                default_value: 0.0,
+                description: "Output 3".to_string(),
+            },
+            PortDescriptor {
+                name: "out4".to_string(),
+                default_value: 0.0,
+                description: "Output 4".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let input_signal = inputs.get("input").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        let [out1, out2, out3, out4] = outputs.get_many_mut(["out1", "out2", "out3", "out4"]);
+        let out1 = out1.unwrap();
+        let out2 = out2.unwrap();
+        let out3 = out3.unwrap();
+        let out4 = out4.unwrap();
+
+        for i in 0..sample_count {
+            let input_value = if i < input_signal.len() { input_signal[i] } else { 0.0 };
+
+            // Copy input to all outputs
+            out1[i] = input_value;
+            out2[i] = input_value;
+            out3[i] = input_value;
+            out4[i] = input_value;
+        }
+    }
+
+    fn set_param(&mut self, _name: &str, _value: f32) -> Result<()> {
+        Err(anyhow!("Mult module has no parameters"))
+    }
+
+    fn get_param(&self, _name: &str) -> Option<f32> {
+        None
+    }
+}
+
 /// Envelope generator
 pub struct GraphEnvelope {
     attack: f32,

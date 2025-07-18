@@ -17,6 +17,7 @@ pub enum ModuleType {
     Slew,
     Seq8,
     Visual,
+    Mult,
 }
 
 impl std::fmt::Display for ModuleType {
@@ -35,6 +36,7 @@ impl std::fmt::Display for ModuleType {
             Self::Slew => write!(f, "slew"),
             Self::Seq8 => write!(f, "seq8"),
             Self::Visual => write!(f, "visual"),
+            Self::Mult => write!(f, "mult"),
         }
     }
 }
@@ -54,6 +56,7 @@ pub fn parse_module_type(s: &str) -> Result<ModuleType> {
         "slew" | "slew_gen" => Ok(ModuleType::Slew),
         "seq8" | "sequencer" => Ok(ModuleType::Seq8),
         "visual" | "scope" | "debug" => Ok(ModuleType::Visual),
+        "mult" | "multiple" => Ok(ModuleType::Mult),
         _ => Err(anyhow!("Unknown module type: {s}")),
     }
 }
