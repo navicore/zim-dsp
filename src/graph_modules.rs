@@ -1474,14 +1474,7 @@ impl GraphModule for GraphSeq8 {
                 if let Some(step_str) = name.strip_prefix("step") {
                     if let Ok(step_num) = step_str.parse::<usize>() {
                         if (1..=8).contains(&step_num) {
-                            println!(
-                                "[DEBUG] Setting step{} = {} (index {})",
-                                step_num,
-                                value,
-                                step_num - 1
-                            );
                             self.steps[step_num - 1] = value;
-                            println!("[DEBUG] steps array is now: {:?}", self.steps);
                             return Ok(());
                         }
                     }
