@@ -911,6 +911,10 @@ pub struct GraphSlewGen {
     target_value: f32,
     sample_rate: f32,
     curve_type: SlewCurve,
+    prev_target: f32, // Track previous target to detect new slew cycles
+    is_slewing: bool,
+    end_of_rise_gate: bool,
+    end_of_cycle_gate: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -929,6 +933,10 @@ impl GraphSlewGen {
             target_value: 0.0,
             sample_rate: 44100.0,
             curve_type: SlewCurve::Linear,
+            prev_target: 0.0,
+            is_slewing: false,
+            end_of_rise_gate: false,
+            end_of_cycle_gate: false,
         }
     }
 
@@ -997,11 +1005,23 @@ impl GraphModule for GraphSlewGen {
     }
 
     fn outputs(&self) -> Vec<PortDescriptor> {
-        vec![PortDescriptor {
-            name: "out".to_string(),
-            default_value: 0.0,
-            description: "Smoothed output signal".to_string(),
-        }]
+        vec![
+            PortDescriptor {
+                name: "out".to_string(),
+                default_value: 0.0,
+                description: "Smoothed output signal".to_string(),
+            },
+            PortDescriptor {
+                name: "eor".to_string(),
+                default_value: 0.0,
+                description: "End-of-rise gate (triggers when upward slew completes)".to_string(),
+            },
+            PortDescriptor {
+                name: "eoc".to_string(),
+                default_value: 0.0,
+                description: "End-of-cycle gate (triggers when any slew completes)".to_string(),
+            },
+        ]
     }
 
     fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
@@ -1010,27 +1030,50 @@ impl GraphModule for GraphSlewGen {
         let fall_cv = inputs.get("fall").map(|b| b.as_slice()).unwrap_or(&[]);
         let curve_cv = inputs.get("curve").map(|b| b.as_slice()).unwrap_or(&[]);
 
-        let out = outputs.get_mut("out").unwrap();
+        let [out, eor_out, eoc_out] = outputs.get_many_mut(["out", "eor", "eoc"]);
+        let out = out.unwrap();
+        let eor_out = eor_out.unwrap();
+        let eoc_out = eoc_out.unwrap();
 
         for i in 0..sample_count {
             // Get current parameter values
             let input_value = if i < input_signal.len() { input_signal[i] } else { 0.0 };
-            let rise_time = if i < rise_cv.len() { rise_cv[i] } else { self.rise_time };
-            let fall_time = if i < fall_cv.len() { fall_cv[i] } else { self.fall_time };
+
+            // For now, let's use CV values directly when available
+            let rise_time = if i < rise_cv.len() && rise_cv[i] != 0.1 {
+                rise_cv[i].max(0.001)
+            } else {
+                self.rise_time
+            };
+
+            let fall_time = if i < fall_cv.len() && fall_cv[i] != 0.1 {
+                fall_cv[i].max(0.001)
+            } else {
+                self.fall_time
+            };
 
             // Update curve type if CV changed
             if i < curve_cv.len() {
                 self.set_curve_from_param(curve_cv[i]);
             }
 
-            // Update target if input changed
-            if (input_value - self.target_value).abs() > 0.001 {
+            // Reset gate outputs
+            self.end_of_rise_gate = false;
+            self.end_of_cycle_gate = false;
+
+            // Check if target changed (new slew cycle starting)
+            if (input_value - self.prev_target).abs() > 0.001 {
                 self.target_value = input_value;
+                self.prev_target = input_value;
+                self.is_slewing = true;
             }
 
-            // Calculate slew
-            if (self.current_value - self.target_value).abs() > 0.001 {
-                let time_constant = if self.target_value > self.current_value {
+            // Check if we're currently slewing
+            let currently_slewing = (self.current_value - self.target_value).abs() > 0.001;
+
+            if currently_slewing {
+                let is_rising = self.target_value > self.current_value;
+                let time_constant = if is_rising {
                     rise_time.max(0.001) // Prevent division by zero
                 } else {
                     fall_time.max(0.001)
@@ -1051,10 +1094,22 @@ impl GraphModule for GraphSlewGen {
                 // Clamp to target if very close
                 if (self.current_value - self.target_value).abs() < 0.001 {
                     self.current_value = self.target_value;
+
+                    // We just finished slewing - trigger gates
+                    if self.is_slewing {
+                        self.end_of_cycle_gate = true;
+                        if is_rising {
+                            self.end_of_rise_gate = true;
+                        }
+                        self.is_slewing = false;
+                    }
                 }
             }
 
+            // Output the current value and gates
             out[i] = self.current_value;
+            eor_out[i] = if self.end_of_rise_gate { 1.0 } else { 0.0 };
+            eoc_out[i] = if self.end_of_cycle_gate { 1.0 } else { 0.0 };
         }
     }
 
@@ -1293,9 +1348,9 @@ impl GraphModule for GraphSwitch {
         // Add input ports dynamically based on input_count
         for i in 1..=self.input_count {
             inputs.push(PortDescriptor {
-                name: format!("in{}", i),
+                name: format!("in{i}"),
                 default_value: 0.0,
-                description: format!("Input {}", i),
+                description: format!("Input {i}"),
             });
         }
 
@@ -1324,7 +1379,7 @@ impl GraphModule for GraphSwitch {
         // Get all input signals
         let mut input_signals = Vec::new();
         for i in 1..=self.input_count {
-            let signal = inputs.get(&format!("in{}", i)).map(|b| b.as_slice()).unwrap_or(&[]);
+            let signal = inputs.get(&format!("in{i}")).map(|b| b.as_slice()).unwrap_or(&[]);
             input_signals.push(signal);
         }
 
@@ -1519,6 +1574,8 @@ pub struct GraphEnvelope {
     current_value: f32,
     sample_rate: f32,
     last_gate: f32, // Track previous gate value for edge detection
+    attack_shape: EnvelopeShape,
+    decay_shape: EnvelopeShape,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1526,6 +1583,13 @@ enum EnvelopePhase {
     Idle,
     Attack,
     Decay,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EnvelopeShape {
+    Linear,
+    Exponential,
+    Logarithmic,
 }
 
 impl GraphEnvelope {
@@ -1538,6 +1602,23 @@ impl GraphEnvelope {
             current_value: 0.0,
             sample_rate: 44100.0,
             last_gate: 0.0,
+            attack_shape: EnvelopeShape::Linear,
+            decay_shape: EnvelopeShape::Linear,
+        }
+    }
+
+    /// Apply envelope shaping curve
+    fn apply_shape(progress: f32, shape: EnvelopeShape) -> f32 {
+        match shape {
+            EnvelopeShape::Linear => progress,
+            EnvelopeShape::Exponential => {
+                // Exponential curve: starts slow, accelerates
+                progress * progress
+            }
+            EnvelopeShape::Logarithmic => {
+                // Logarithmic curve: starts fast, decelerates
+                (progress * 2.0 - progress * progress).min(1.0)
+            }
         }
     }
 }
@@ -1585,7 +1666,8 @@ impl GraphModule for GraphEnvelope {
                 }
                 EnvelopePhase::Attack => {
                     if self.attack > 0.0 {
-                        self.current_value = (self.phase_time / self.attack).min(1.0);
+                        let linear_progress = (self.phase_time / self.attack).min(1.0);
+                        self.current_value = Self::apply_shape(linear_progress, self.attack_shape);
                         if self.phase_time >= self.attack {
                             self.phase = EnvelopePhase::Decay;
                             self.phase_time = 0.0;
@@ -1598,7 +1680,9 @@ impl GraphModule for GraphEnvelope {
                 }
                 EnvelopePhase::Decay => {
                     if self.decay > 0.0 {
-                        self.current_value = 1.0 - (self.phase_time / self.decay).min(1.0);
+                        let linear_progress = (self.phase_time / self.decay).min(1.0);
+                        let shaped_progress = Self::apply_shape(linear_progress, self.decay_shape);
+                        self.current_value = 1.0 - shaped_progress;
                         if self.phase_time >= self.decay {
                             self.phase = EnvelopePhase::Idle;
                             self.phase_time = 0.0;
@@ -1631,6 +1715,34 @@ impl GraphModule for GraphEnvelope {
                 self.decay = value;
                 Ok(())
             }
+            "attack_shape" => {
+                self.attack_shape = match value as i32 {
+                    0 => EnvelopeShape::Linear,
+                    1 => EnvelopeShape::Exponential,
+                    2 => EnvelopeShape::Logarithmic,
+                    _ => {
+                        return Err(anyhow!(
+                            "Invalid attack shape: {} (0=linear, 1=exp, 2=log)",
+                            value
+                        ))
+                    }
+                };
+                Ok(())
+            }
+            "decay_shape" => {
+                self.decay_shape = match value as i32 {
+                    0 => EnvelopeShape::Linear,
+                    1 => EnvelopeShape::Exponential,
+                    2 => EnvelopeShape::Logarithmic,
+                    _ => {
+                        return Err(anyhow!(
+                            "Invalid decay shape: {} (0=linear, 1=exp, 2=log)",
+                            value
+                        ))
+                    }
+                };
+                Ok(())
+            }
             _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
@@ -1639,6 +1751,16 @@ impl GraphModule for GraphEnvelope {
         match name {
             "attack" => Some(self.attack),
             "decay" => Some(self.decay),
+            "attack_shape" => Some(match self.attack_shape {
+                EnvelopeShape::Linear => 0.0,
+                EnvelopeShape::Exponential => 1.0,
+                EnvelopeShape::Logarithmic => 2.0,
+            }),
+            "decay_shape" => Some(match self.decay_shape {
+                EnvelopeShape::Linear => 0.0,
+                EnvelopeShape::Exponential => 1.0,
+                EnvelopeShape::Logarithmic => 2.0,
+            }),
             _ => None,
         }
     }

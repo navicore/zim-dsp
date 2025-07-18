@@ -1,0 +1,68 @@
+# Todd Barton Krell Patch Demo
+# Uses slew end-of-cycle gates to create self-generating evolving patterns
+
+# Random source for unpredictable values
+noise: noise
+
+# Sample & Hold to create stepped random voltages
+# We'll implement this with a simple VCA+slew for now
+random_level: vca
+random_level.audio <- noise.white
+random_level.gain <- 0.01  # Very low level for subtle random
+
+# Primary slew generator - the heart of the Krell patch
+main_slew: slew 0.5 0.8
+main_slew.in <- random_level.out
+
+# The end-of-cycle gate triggers new random values
+# Connect it to create self-generating behavior
+trigger_gen: lfo 0.2
+trigger_gen2: lfo 0.3
+
+# Use EOC to trigger sequencer steps
+seq1: seq8
+seq1.clock <- main_slew.eoc
+seq1.step1 <- 220
+seq1.step2 <- 277
+seq1.step3 <- 330
+seq1.step4 <- 392
+seq1.step5 <- 440
+seq1.step6 <- 523
+seq1.step7 <- 587
+seq1.step8 <- 659
+
+# Use EOR to trigger envelope
+env1: envelope 0.05 0.8
+env1.gate <- main_slew.eor
+
+# Second slew with different timing
+slow_slew: slew 1.2 0.4
+slow_slew.in <- seq1.cv
+
+# EOR triggers a second envelope
+env2: envelope 0.02 0.3
+env2.gate <- slow_slew.eor
+
+# Two oscillators with different characteristics
+osc1: osc sine
+osc1.freq <- slow_slew.out
+
+osc2: osc triangle
+osc2.freq <- seq1.cv
+
+# VCAs controlled by envelopes
+vca1: vca
+vca1.audio <- osc1.sine
+vca1.cv <- env1.out
+
+vca2: vca
+vca2.audio <- osc2.triangle
+vca2.cv <- env2.out
+
+# Mix the voices
+mixer: mix 2
+mixer.in1 <- vca1.out * 0.4
+mixer.in2 <- vca2.out * 0.3
+
+# Output
+out <- mixer.out * 0.8
