@@ -102,7 +102,7 @@ impl GraphEngine {
                 }
             }
             Command::SetParam { module, param, value } => {
-                // TODO: Implement parameter setting on graph modules
+                self.graph.lock().unwrap().set_module_param(&module, &param, value)?;
                 Ok(format!("Set {module}.{param} = {value}"))
             }
         }

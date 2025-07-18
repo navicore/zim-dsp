@@ -4,18 +4,27 @@
 # Master clock
 clock: lfo 2  # 2 Hz clock
 
-# 8-step sequencer with default values
+# 8-step sequencer with default ascending pattern
 seq: seq8
 
+# Set step values as frequencies (Hz)
+seq.step1 <- 220   # A3
+seq.step2 <- 247   # B3  
+seq.step3 <- 277   # C#4
+seq.step4 <- 311   # D#4
+seq.step5 <- 349   # F4
+seq.step6 <- 392   # G4
+seq.step7 <- 440   # A4
+seq.step8 <- 494   # B4
+
 # Oscillator controlled by sequencer CV
-vco: osc sine 440
+vco: osc sine 220
 
 # Connect clock to sequencer
 seq.clock <- clock.gate
 
-# Use sequencer CV to control oscillator frequency
-# (This will need expression support to work properly)
-vco.freq <- 440  # Fixed for now
+# Connect sequencer CV to control oscillator frequency
+vco.freq <- seq.cv
 
 # Envelope triggered by sequencer gates
 env: envelope 0.01 0.1
