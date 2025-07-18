@@ -18,6 +18,8 @@ pub enum ModuleType {
     Seq8,
     Visual,
     Mult,
+    Switch,
+    ClockDiv,
 }
 
 impl std::fmt::Display for ModuleType {
@@ -37,6 +39,8 @@ impl std::fmt::Display for ModuleType {
             Self::Seq8 => write!(f, "seq8"),
             Self::Visual => write!(f, "visual"),
             Self::Mult => write!(f, "mult"),
+            Self::Switch => write!(f, "switch"),
+            Self::ClockDiv => write!(f, "clockdiv"),
         }
     }
 }
@@ -57,6 +61,8 @@ pub fn parse_module_type(s: &str) -> Result<ModuleType> {
         "seq8" | "sequencer" => Ok(ModuleType::Seq8),
         "visual" | "scope" | "debug" => Ok(ModuleType::Visual),
         "mult" | "multiple" => Ok(ModuleType::Mult),
+        "switch" | "seq_switch" => Ok(ModuleType::Switch),
+        "clockdiv" | "clock_div" | "divider" => Ok(ModuleType::ClockDiv),
         _ => Err(anyhow!("Unknown module type: {s}")),
     }
 }

@@ -2,9 +2,9 @@
 
 use crate::graph::{Connection, ConnectionExpr, GraphExecutor, ModuleInfo};
 use crate::graph_modules::{
-    GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphMonoMixer, GraphMult,
-    GraphNoiseGen, GraphOscillator, GraphSeq8, GraphSlewGen, GraphStereoOutput, GraphVca,
-    GraphVisual,
+    GraphClockDiv, GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphMonoMixer,
+    GraphMult, GraphNoiseGen, GraphOscillator, GraphSeq8, GraphSlewGen, GraphStereoOutput,
+    GraphSwitch, GraphVca, GraphVisual,
 };
 use crate::modules::ModuleType;
 use crate::parser::{parse_line, Command};
@@ -255,6 +255,18 @@ impl GraphEngine {
             ModuleType::Seq8 => Box::new(GraphSeq8::new()),
             ModuleType::Visual => Box::new(GraphVisual::new()),
             ModuleType::Mult => Box::new(GraphMult::new()),
+            ModuleType::Switch => {
+                // Default to 4 inputs, or use parameter if provided
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let input_count = params.first().copied().unwrap_or(4.0) as usize;
+                Box::new(GraphSwitch::new(input_count))
+            }
+            ModuleType::ClockDiv => {
+                // Default to division by 4, or use parameter if provided
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let division = params.first().copied().unwrap_or(4.0) as usize;
+                Box::new(GraphClockDiv::new(division))
+            }
             ModuleType::Output => {
                 return Err(anyhow!("Module type {:?} not yet implemented", module_type))
             }

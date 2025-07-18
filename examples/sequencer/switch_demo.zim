@@ -1,0 +1,58 @@
+# Sequential Switch Demo
+# Two sequencers feeding into a switch that alternates between them
+# Uses clock division for proper timing relationships
+
+# Master clock generator
+master_clock: lfo 10.0
+
+# Clock mult to distribute to sequencers
+clockmult: mult
+clockmult.input <- master_clock.gate
+
+# Clock divider for switch - divide by 4 so switch changes every 4 sequencer steps
+switch_div: clockdiv 4
+switch_div.clock <- master_clock.gate
+
+# Two sequencers with different patterns
+seq1: seq8
+seq2: seq8
+
+# Connect clocks
+seq1.clock <- clockmult.out1
+seq2.clock <- clockmult.out2
+
+# Different melodic patterns - seq1 has 5 steps, seq2 has 4 steps
+seq1.step1 <- 220
+seq1.step2 <- 246
+seq1.step3 <- 277
+seq1.step4 <- 311
+seq1.step5 <- 660
+seq1.length <- 5
+
+seq2.step1 <- 440
+seq2.step2 <- 493
+seq2.step3 <- 554
+seq2.step4 <- 622
+seq2.length <- 4
+
+# Sequential switch - alternates between the two sequencers every 4 steps
+switch: switch 2
+switch.clock <- switch_div.gate
+switch.in1 <- seq1.cv
+switch.in2 <- seq2.cv
+
+# Oscillator driven by the switch
+osc: osc sine
+osc.freq <- switch.out
+
+# Envelope triggered by switch gate
+env: envelope 0.01 0.06
+env.gate <- switch.gate
+
+# VCA for shaping
+vca: vca
+vca.audio <- osc.sine
+vca.cv <- env.out
+
+# Output
+out <- vca.out * 0.6

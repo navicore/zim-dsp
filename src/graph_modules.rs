@@ -1245,6 +1245,271 @@ impl GraphModule for GraphMult {
     }
 }
 
+/// Sequential switch module - switches between multiple inputs based on clock
+pub struct GraphSwitch {
+    current_input: usize,
+    input_count: usize,
+    last_clock: f32,
+    switch_count: usize,
+}
+
+impl GraphSwitch {
+    pub fn new(input_count: usize) -> Self {
+        Self {
+            current_input: 0,
+            input_count: input_count.clamp(2, 8), // 2-8 inputs
+            last_clock: 0.0,
+            switch_count: 0,
+        }
+    }
+
+    pub fn set_input_count(&mut self, count: usize) {
+        self.input_count = count.clamp(2, 8);
+        if self.current_input >= self.input_count {
+            self.current_input = 0;
+        }
+    }
+}
+
+impl GraphModule for GraphSwitch {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        let mut inputs = vec![
+            PortDescriptor {
+                name: "clock".to_string(),
+                default_value: 0.0,
+                description: "Clock input to advance switch position".to_string(),
+            },
+            PortDescriptor {
+                name: "reset".to_string(),
+                default_value: 0.0,
+                description: "Reset switch to input 1".to_string(),
+            },
+        ];
+
+        // Add input ports dynamically based on input_count
+        for i in 1..=self.input_count {
+            inputs.push(PortDescriptor {
+                name: format!("in{}", i),
+                default_value: 0.0,
+                description: format!("Input {}", i),
+            });
+        }
+
+        inputs
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "out".to_string(),
+                default_value: 0.0,
+                description: "Selected input output".to_string(),
+            },
+            PortDescriptor {
+                name: "gate".to_string(),
+                default_value: 0.0,
+                description: "Gate output when switching".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let clock = inputs.get("clock").map(|b| b.as_slice()).unwrap_or(&[]);
+        let reset = inputs.get("reset").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        // Get all input signals
+        let mut input_signals = Vec::new();
+        for i in 1..=self.input_count {
+            let signal = inputs.get(&format!("in{}", i)).map(|b| b.as_slice()).unwrap_or(&[]);
+            input_signals.push(signal);
+        }
+
+        let [out, gate_out] = outputs.get_many_mut(["out", "gate"]);
+        let out = out.unwrap();
+        let gate_out = gate_out.unwrap();
+
+        for i in 0..sample_count {
+            let clock_val = if i < clock.len() { clock[i] } else { 0.0 };
+            let reset_val = if i < reset.len() { reset[i] } else { 0.0 };
+
+            // Check for reset trigger
+            if reset_val > 0.5 {
+                self.current_input = 0;
+            }
+
+            // Check for clock rising edge
+            let rising_edge = clock_val > 0.5 && self.last_clock <= 0.5;
+            if rising_edge {
+                self.current_input = (self.current_input + 1) % self.input_count;
+                self.switch_count += 1;
+            }
+
+            // Output the selected input
+            let selected_signal = &input_signals[self.current_input];
+            out[i] = if i < selected_signal.len() { selected_signal[i] } else { 0.0 };
+
+            // Gate output - brief pulse when switching
+            gate_out[i] = if rising_edge { 1.0 } else { 0.0 };
+
+            // Update last_clock for next iteration
+            self.last_clock = clock_val;
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        match name {
+            "inputs" => {
+                self.set_input_count(value as usize);
+                Ok(())
+            }
+            "reset" => {
+                if value > 0.5 {
+                    self.current_input = 0;
+                }
+                Ok(())
+            }
+            _ => Err(anyhow!("Unknown parameter: {}", name)),
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        match name {
+            "inputs" => Some(self.input_count as f32),
+            "current" => Some(self.current_input as f32 + 1.0), // 1-indexed for user
+            "count" => Some(self.switch_count as f32),
+            _ => None,
+        }
+    }
+}
+
+/// Clock divider module - divides input clock by configurable ratio
+pub struct GraphClockDiv {
+    division: usize,
+    counter: usize,
+    last_clock: f32,
+    output_state: bool,
+}
+
+impl GraphClockDiv {
+    pub fn new(division: usize) -> Self {
+        Self {
+            division: division.max(1),
+            counter: 0,
+            last_clock: 0.0,
+            output_state: false,
+        }
+    }
+
+    pub fn set_division(&mut self, division: usize) {
+        self.division = division.max(1);
+        self.counter = 0;
+    }
+}
+
+impl GraphModule for GraphClockDiv {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "clock".to_string(),
+                default_value: 0.0,
+                description: "Input clock signal".to_string(),
+            },
+            PortDescriptor {
+                name: "reset".to_string(),
+                default_value: 0.0,
+                description: "Reset counter".to_string(),
+            },
+        ]
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "out".to_string(),
+                default_value: 0.0,
+                description: "Divided clock output".to_string(),
+            },
+            PortDescriptor {
+                name: "gate".to_string(),
+                default_value: 0.0,
+                description: "Gate output for divided clock".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let clock = inputs.get("clock").map(|b| b.as_slice()).unwrap_or(&[]);
+        let reset = inputs.get("reset").map(|b| b.as_slice()).unwrap_or(&[]);
+
+        let [out, gate_out] = outputs.get_many_mut(["out", "gate"]);
+        let out = out.unwrap();
+        let gate_out = gate_out.unwrap();
+
+        for i in 0..sample_count {
+            let clock_val = if i < clock.len() { clock[i] } else { 0.0 };
+            let reset_val = if i < reset.len() { reset[i] } else { 0.0 };
+
+            // Check for reset trigger
+            if reset_val > 0.5 {
+                self.counter = 0;
+                self.output_state = false;
+            }
+
+            // Check for clock rising edge
+            let rising_edge = clock_val > 0.5 && self.last_clock <= 0.5;
+            if rising_edge {
+                self.counter += 1;
+                if self.counter >= self.division {
+                    self.counter = 0;
+                    self.output_state = !self.output_state;
+                }
+            }
+
+            // Output divided clock
+            out[i] = if self.output_state { 1.0 } else { 0.0 };
+
+            // Gate output - pulse on divided clock rising edge
+            gate_out[i] = if rising_edge && self.counter == 0 { 1.0 } else { 0.0 };
+
+            // Update last_clock for next iteration
+            self.last_clock = clock_val;
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        match name {
+            "division" | "div" => {
+                self.set_division(value as usize);
+                Ok(())
+            }
+            "reset" => {
+                if value > 0.5 {
+                    self.counter = 0;
+                    self.output_state = false;
+                }
+                Ok(())
+            }
+            _ => Err(anyhow!("Unknown parameter: {}", name)),
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        match name {
+            "division" | "div" => Some(self.division as f32),
+            "counter" => Some(self.counter as f32),
+            _ => None,
+        }
+    }
+}
+
 /// Envelope generator
 pub struct GraphEnvelope {
     attack: f32,
