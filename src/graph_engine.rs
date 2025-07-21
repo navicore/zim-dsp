@@ -7,6 +7,7 @@ use crate::graph_modules::{
     GraphSwitch, GraphVca, GraphVisual,
 };
 use crate::modules::ModuleType;
+use crate::observability::SignalObserver;
 use crate::parser::{parse_line, Command};
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -437,7 +438,33 @@ impl GraphEngine {
         self.graph.lock().unwrap().release_manual_gates()
     }
 
-    /// Build an audio stream for the given sample format
+    /// Add an observer to the graph for monitoring
+    ///
+    /// # Panics
+    /// Panics if the graph mutex is poisoned
+    #[allow(dead_code)] // Used by test framework
+    pub fn add_observer(&self, observer: Box<dyn SignalObserver>) {
+        self.graph.lock().unwrap().add_observer(observer);
+    }
+
+    /// Process the graph directly for testing (without audio output)
+    ///
+    /// # Panics
+    /// Panics if the graph mutex is poisoned
+    #[allow(dead_code)] // Used by test framework
+    pub fn process_for_test(&self, sample_count: usize) {
+        self.graph.lock().unwrap().process(sample_count);
+    }
+
+    /// Get access to the observer manager for test inspection
+    ///
+    /// # Panics
+    /// Panics if the graph mutex is poisoned
+    #[allow(dead_code)] // Used by test framework
+    pub fn observer_manager_mut(&self) -> std::sync::MutexGuard<'_, crate::graph::GraphExecutor> {
+        self.graph.lock().unwrap()
+    }
+
     /// Build an audio stream for the given sample format
     ///
     /// # Errors

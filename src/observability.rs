@@ -5,6 +5,7 @@
 
 /// A single signal observation event
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Test framework event types
 pub struct SignalEvent {
     pub module: String,
     pub port: String,
@@ -14,6 +15,7 @@ pub struct SignalEvent {
 
 /// A gate/trigger event
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Test framework event types
 pub struct GateEvent {
     pub module: String,
     pub gate: String,
@@ -30,7 +32,7 @@ pub struct ParameterEvent {
 }
 
 /// Trait for observing signals and events in the audio graph
-pub trait SignalObserver {
+pub trait SignalObserver: Send {
     /// Called when a signal value is observed
     fn observe_signal(&mut self, event: &SignalEvent);
 
@@ -68,6 +70,7 @@ impl ObservationCollector {
 
     /// Get all signal values for a specific module and port
     #[must_use]
+    #[allow(dead_code)] // Test framework API
     pub fn get_signal_values(&self, module: &str, port: &str) -> Vec<f32> {
         self.signals
             .iter()
@@ -78,6 +81,7 @@ impl ObservationCollector {
 
     /// Get all gate events for a specific module and gate
     #[must_use]
+    #[allow(dead_code)] // Test framework API
     pub fn get_gate_events(&self, module: &str, gate: &str) -> Vec<&GateEvent> {
         self.gates
             .iter()
@@ -87,6 +91,7 @@ impl ObservationCollector {
 
     /// Check if a gate fired during observation
     #[must_use]
+    #[allow(dead_code)] // Test framework API
     pub fn gate_fired(&self, module: &str, gate: &str) -> bool {
         self.gates
             .iter()
@@ -95,6 +100,7 @@ impl ObservationCollector {
 
     /// Get the range of values for a signal
     #[must_use]
+    #[allow(dead_code)] // Test framework API
     pub fn signal_range(&self, module: &str, port: &str) -> Option<(f32, f32)> {
         let values = self.get_signal_values(module, port);
         if values.is_empty() {
@@ -108,6 +114,7 @@ impl ObservationCollector {
 
     /// Check if a signal varied during observation
     #[must_use]
+    #[allow(dead_code)] // Test framework API
     pub fn signal_varied(&self, module: &str, port: &str) -> bool {
         let values = self.get_signal_values(module, port);
         if values.len() < 2 {
@@ -150,6 +157,7 @@ pub struct ConsoleObserver {
 
 impl ConsoleObserver {
     #[must_use]
+    #[allow(dead_code)] // Test framework observer
     pub const fn new(verbose: bool) -> Self {
         Self { verbose }
     }
