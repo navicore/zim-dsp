@@ -911,6 +911,11 @@ pub struct GraphSlewGen {
     target_value: f32,
     sample_rate: f32,
     curve_type: SlewCurve,
+    // Gate state tracking
+    previous_value: f32,
+    is_rising: bool,
+    is_falling: bool,
+    reached_target: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -929,6 +934,11 @@ impl GraphSlewGen {
             target_value: 0.0,
             sample_rate: 44100.0,
             curve_type: SlewCurve::Linear,
+            // Initialize gate state
+            previous_value: 0.0,
+            is_rising: false,
+            is_falling: false,
+            reached_target: false, // Start as not at target to allow first transition to fire gates
         }
     }
 
@@ -992,18 +1002,35 @@ impl GraphModule for GraphSlewGen {
     }
 
     fn outputs(&self) -> Vec<PortDescriptor> {
-        vec![PortDescriptor {
-            name: "out".to_string(),
-            default_value: 0.0,
-            description: "Smoothed output signal".to_string(),
-        }]
+        vec![
+            PortDescriptor {
+                name: "out".to_string(),
+                default_value: 0.0,
+                description: "Smoothed output signal".to_string(),
+            },
+            PortDescriptor {
+                name: "eor".to_string(),
+                default_value: 0.0,
+                description: "End-of-rise gate (fires when reaching target while rising)"
+                    .to_string(),
+            },
+            PortDescriptor {
+                name: "eoc".to_string(),
+                default_value: 0.0,
+                description: "End-of-cycle gate (fires when reaching target while falling)"
+                    .to_string(),
+            },
+        ]
     }
 
     fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
         let input_signal = inputs.get("in").map(|b| b.as_slice()).unwrap_or(&[]);
         let rise_cv = inputs.get("rise").map(|b| b.as_slice()).unwrap_or(&[]);
         let fall_cv = inputs.get("fall").map(|b| b.as_slice()).unwrap_or(&[]);
-        let out = outputs.get_mut("out").unwrap();
+        let [out, eor_out, eoc_out] = outputs.get_many_mut(["out", "eor", "eoc"]);
+        let out = out.unwrap();
+        let eor_out = eor_out.unwrap();
+        let eoc_out = eoc_out.unwrap();
 
         for i in 0..sample_count {
             // Get the current input value
@@ -1028,12 +1055,34 @@ impl GraphModule for GraphSlewGen {
                 self.fall_time.max(0.001) // Parameter default
             };
 
+            // Track previous state for gate detection
+            let was_at_target = self.reached_target;
+            let previous_value = self.current_value;
+
             // Calculate the difference between current and target
             let diff = self.target_value - self.current_value;
 
+            // Gates default to HIGH for self-patching bootstrap, but will pulse LOW→HIGH
+            // This maintains analog behavior where gates start HIGH until activity
+            eor_out[i] = 1.0;
+            eoc_out[i] = 1.0;
+
             if diff.abs() > 0.001 {
+                // We're moving - not at target
+                self.reached_target = false;
+
                 // Determine if we're rising or falling
                 let is_rising = diff > 0.0;
+                self.is_rising = is_rising;
+                self.is_falling = !is_rising;
+
+                // During slewing: appropriate gate goes LOW
+                if is_rising {
+                    eor_out[i] = 0.0; // EOR LOW during rising
+                } else {
+                    eoc_out[i] = 0.0; // EOC LOW during falling
+                }
+
                 let time_constant =
                     if is_rising { effective_rise_time } else { effective_fall_time };
 
@@ -1047,15 +1096,48 @@ impl GraphModule for GraphSlewGen {
 
                 self.current_value += step;
 
-                // Clamp to prevent overshoot
-                if (is_rising && self.current_value > self.target_value)
-                    || (!is_rising && self.current_value < self.target_value)
-                {
+                // Check if we reached the target this sample
+                let reached_target_this_sample = if is_rising {
+                    self.current_value >= self.target_value
+                } else {
+                    self.current_value <= self.target_value
+                };
+
+                // Fire gate pulse ONLY on the sample when we reach target
+                if reached_target_this_sample {
                     self.current_value = self.target_value;
+                    self.reached_target = true;
+
+                    // Single-sample completion pulse
+                    if is_rising {
+                        eor_out[i] = 1.0; // EOR pulse on completion of rise
+                    } else {
+                        eoc_out[i] = 1.0; // EOC pulse on completion of fall
+                    }
                 }
+            } else {
+                // Close enough to target - consider reached
+                if !was_at_target {
+                    // We just reached the target - fire completion pulse
+                    let was_rising = self.is_rising;
+                    let was_falling = self.is_falling;
+
+                    // Single-sample completion pulse
+                    if was_rising {
+                        eor_out[i] = 1.0; // EOR pulse
+                    } else if was_falling {
+                        eoc_out[i] = 1.0; // EOC pulse
+                    }
+                }
+
+                self.current_value = self.target_value;
+                self.reached_target = true;
+                self.is_rising = false;
+                self.is_falling = false;
             }
 
             out[i] = self.current_value;
+            self.previous_value = previous_value;
         }
     }
 

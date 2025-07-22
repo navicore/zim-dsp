@@ -173,6 +173,8 @@ pub struct GraphExecutor {
     execution_order: Vec<String>,
     observers: ObserverManager,
     current_cycle: usize,
+    // Gate state tracking for edge detection
+    gate_states: HashMap<String, f32>, // module.port -> previous value
 }
 
 impl GraphExecutor {
@@ -185,6 +187,7 @@ impl GraphExecutor {
             execution_order: Vec::new(),
             observers: ObserverManager::new(),
             current_cycle: 0,
+            gate_states: HashMap::new(),
         }
     }
 
@@ -216,7 +219,6 @@ impl GraphExecutor {
 
         // Process each module in order
         for module_name in &self.execution_order {
-            println!("DEBUG: Processing module: {module_name}");
             if let Some(module) = self.modules.get_mut(module_name) {
                 // Prepare input buffers for this module
                 let module_inputs = self.input_buffers.get_mut(module_name).unwrap();
@@ -235,19 +237,59 @@ impl GraphExecutor {
 
                 // Observe output signals (sample some values, not all for performance)
                 // We need to collect the observation data first to avoid borrowing issues
-                let mut observations = Vec::new();
+                let mut signal_observations = Vec::new();
+                let mut gate_observations = Vec::new();
                 let sample_step = if sample_count > 128 { 64 } else { 1 };
 
                 for (port_name, buffer) in &module_outputs.buffers {
-                    for (i, &value) in buffer.iter().enumerate().step_by(sample_step) {
-                        let sample_index = self.current_cycle * sample_count + i;
-                        observations.push((port_name.clone(), sample_index, value));
+                    // Check if this is a gate output (commonly named eor, eoc, gate, trigger, etc.)
+                    let is_gate_output = port_name.contains("eor")
+                        || port_name.contains("eoc")
+                        || port_name.contains("gate")
+                        || port_name.contains("trigger")
+                        || port_name.contains("clock");
+
+                    if is_gate_output {
+                        // For gate outputs, observe as both signals and gates
+                        for (i, &value) in buffer.iter().enumerate() {
+                            let sample_index = self.current_cycle * sample_count + i;
+
+                            // Observe as signal (sampled for performance)
+                            if i % sample_step == 0 {
+                                signal_observations.push((port_name.clone(), sample_index, value));
+                            }
+
+                            // Observe as gate event - detect LOW→HIGH transitions (edge detection)
+                            let gate_key = format!("{module_name}.{port_name}");
+                            let prev_value =
+                                self.gate_states.get(&gate_key).copied().unwrap_or(0.0);
+                            let current_high = value > 0.5;
+                            let prev_high = prev_value > 0.5;
+
+                            // Only trigger on LOW→HIGH transitions (rising edge)
+                            if current_high && !prev_high {
+                                gate_observations.push((port_name.clone(), sample_index, true));
+                            }
+
+                            // Update gate state for next sample
+                            self.gate_states.insert(gate_key, value);
+                        }
+                    } else {
+                        // For regular signals, sample for performance
+                        for (i, &value) in buffer.iter().enumerate().step_by(sample_step) {
+                            let sample_index = self.current_cycle * sample_count + i;
+                            signal_observations.push((port_name.clone(), sample_index, value));
+                        }
                     }
                 }
 
                 // Now observe the collected data
-                for (port_name, sample_index, value) in observations {
+                for (port_name, sample_index, value) in signal_observations {
                     self.observers.observe_signal(module_name, &port_name, sample_index, value);
+                }
+
+                for (port_name, sample_index, triggered) in gate_observations {
+                    self.observers.observe_gate(module_name, &port_name, sample_index, triggered);
                 }
             }
         }
