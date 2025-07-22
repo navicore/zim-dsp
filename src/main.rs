@@ -22,22 +22,16 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     match args.get(1).map(String::as_str) {
-        Some("play") => {
-            if let Some(patch_file) = args.get(2) {
-                play_patch(patch_file)?;
-            } else {
-                eprintln!("Usage: zim-dsp play <patch_file>");
-            }
+        Some("help" | "-h" | "--help") => {
+            print_help();
         }
-        Some("repl") => {
+        Some(file_path) => {
+            // First argument is a file path
+            play_patch(file_path)?;
+        }
+        None => {
+            // No arguments - go to REPL
             run_repl()?;
-        }
-        Some("help" | "-h" | "--help") | None => {
-            print_help();
-        }
-        Some(_) => {
-            eprintln!("Unknown command. Use 'help' to see available commands.");
-            print_help();
         }
     }
 
@@ -50,14 +44,66 @@ fn play_patch(patch_file: &str) -> Result<()> {
     let mut engine = GraphEngine::new();
     let patch_content = std::fs::read_to_string(patch_file)?;
 
-    engine.load_patch(&patch_content)?;
-    engine.start()?;
+    // Check if the patch contains a "start" command
+    let has_start_command = patch_content.lines().any(|line| line.trim() == "start");
 
-    println!("Playing... Press Enter to stop");
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
+    // Filter out "start" command from patch content since it's a control command, not DSL
+    let filtered_patch_content: String = patch_content
+        .lines()
+        .filter(|line| line.trim() != "start")
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    engine.stop();
+    engine.load_patch(&filtered_patch_content)?;
+
+    if has_start_command {
+        // Auto-play mode for scripts with explicit "start"
+        engine.start()?;
+        println!("Playing... Press Enter to stop");
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        engine.stop();
+    } else {
+        // Interactive mode for scripts without "start"
+        println!("Patch loaded successfully.");
+        println!("Commands: 'start' to begin audio, 'stop' to stop, 'quit' to exit");
+
+        loop {
+            print!("> ");
+            std::io::Write::flush(&mut std::io::stdout())?;
+
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input)?;
+            let command = input.trim();
+
+            match command {
+                "start" => {
+                    engine.start()?;
+                    println!("Audio started");
+                }
+                "stop" => {
+                    engine.stop();
+                    println!("Audio stopped");
+                }
+                "quit" | "exit" => {
+                    engine.stop();
+                    println!("Goodbye!");
+                    break;
+                }
+                "help" => {
+                    println!("Available commands:");
+                    println!("  start - Start audio playback");
+                    println!("  stop  - Stop audio playback");
+                    println!("  quit  - Exit program");
+                }
+                "" => {} // Empty input, continue
+                _ => {
+                    println!("Unknown command: '{command}'. Type 'help' for available commands.");
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -210,15 +256,21 @@ fn run_repl() -> Result<()> {
 fn print_help() {
     println!(
         "Zim-DSP - Text-based modular synthesizer
-    
+
 Usage:
-    zim-dsp play <patch_file>    Play a patch file
-    zim-dsp repl                 Start interactive REPL
-    zim-dsp help                 Show this help
+    zim-dsp <patch_file>    Load and play a patch file 
+    zim-dsp                 Start interactive mode
+    zim-dsp help            Show this help
+
+Behavior:
+    • Files with 'start' command auto-play
+    • Files without 'start' enter interactive mode  
+    • Interactive mode: type 'start', 'stop', 'quit'
 
 Examples:
-    zim-dsp play examples/basic_patch.zim
-    zim-dsp repl
+    zim-dsp examples/simple_test.zim     # Auto-plays
+    zim-dsp examples/stereo_test.zim     # Interactive
+    zim-dsp                              # REPL mode
 "
     );
 }
