@@ -911,10 +911,6 @@ pub struct GraphSlewGen {
     target_value: f32,
     sample_rate: f32,
     curve_type: SlewCurve,
-    prev_target: f32, // Track previous target to detect new slew cycles
-    is_slewing: bool,
-    end_of_rise_gate: bool,
-    end_of_cycle_gate: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -933,10 +929,6 @@ impl GraphSlewGen {
             target_value: 0.0,
             sample_rate: 44100.0,
             curve_type: SlewCurve::Linear,
-            prev_target: 0.0,
-            is_slewing: false,
-            end_of_rise_gate: false,
-            end_of_cycle_gate: false,
         }
     }
 
@@ -988,128 +980,82 @@ impl GraphModule for GraphSlewGen {
             },
             PortDescriptor {
                 name: "rise".to_string(),
-                default_value: 0.1,
-                description: "Rise time in seconds".to_string(),
+                default_value: 0.0,
+                description: "Rise time CV (0V = use parameter, >0V = override)".to_string(),
             },
             PortDescriptor {
                 name: "fall".to_string(),
-                default_value: 0.1,
-                description: "Fall time in seconds".to_string(),
-            },
-            PortDescriptor {
-                name: "curve".to_string(),
                 default_value: 0.0,
-                description: "Curve type: 0=linear, 1=exponential, 2=logarithmic".to_string(),
+                description: "Fall time CV (0V = use parameter, >0V = override)".to_string(),
             },
         ]
     }
 
     fn outputs(&self) -> Vec<PortDescriptor> {
-        vec![
-            PortDescriptor {
-                name: "out".to_string(),
-                default_value: 0.0,
-                description: "Smoothed output signal".to_string(),
-            },
-            PortDescriptor {
-                name: "eor".to_string(),
-                default_value: 0.0,
-                description: "End-of-rise gate (triggers when upward slew completes)".to_string(),
-            },
-            PortDescriptor {
-                name: "eoc".to_string(),
-                default_value: 0.0,
-                description: "End-of-cycle gate (triggers when any slew completes)".to_string(),
-            },
-        ]
+        vec![PortDescriptor {
+            name: "out".to_string(),
+            default_value: 0.0,
+            description: "Smoothed output signal".to_string(),
+        }]
     }
 
     fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
         let input_signal = inputs.get("in").map(|b| b.as_slice()).unwrap_or(&[]);
         let rise_cv = inputs.get("rise").map(|b| b.as_slice()).unwrap_or(&[]);
         let fall_cv = inputs.get("fall").map(|b| b.as_slice()).unwrap_or(&[]);
-        let curve_cv = inputs.get("curve").map(|b| b.as_slice()).unwrap_or(&[]);
-
-        let [out, eor_out, eoc_out] = outputs.get_many_mut(["out", "eor", "eoc"]);
-        let out = out.unwrap();
-        let eor_out = eor_out.unwrap();
-        let eoc_out = eoc_out.unwrap();
+        let out = outputs.get_mut("out").unwrap();
 
         for i in 0..sample_count {
-            // Get current parameter values
+            // Get the current input value
             let input_value = if i < input_signal.len() { input_signal[i] } else { 0.0 };
+            self.target_value = input_value;
 
-            // For now, let's use CV values directly when available
-            let rise_time = if i < rise_cv.len() && rise_cv[i] != 0.1 {
-                rise_cv[i].max(0.001)
+            // Get CV values for this sample
+            let rise_cv_value = if i < rise_cv.len() { rise_cv[i] } else { 0.0 };
+            let fall_cv_value = if i < fall_cv.len() { fall_cv[i] } else { 0.0 };
+
+            // Calculate effective rise and fall times
+            // If CV > 0, use CV value; otherwise use parameter value
+            let effective_rise_time = if rise_cv_value > 0.001 {
+                rise_cv_value.max(0.001) // CV override
             } else {
-                self.rise_time
+                self.rise_time.max(0.001) // Parameter default
             };
 
-            let fall_time = if i < fall_cv.len() && fall_cv[i] != 0.1 {
-                fall_cv[i].max(0.001)
+            let effective_fall_time = if fall_cv_value > 0.001 {
+                fall_cv_value.max(0.001) // CV override
             } else {
-                self.fall_time
+                self.fall_time.max(0.001) // Parameter default
             };
 
-            // Update curve type if CV changed
-            if i < curve_cv.len() {
-                self.set_curve_from_param(curve_cv[i]);
-            }
+            // Calculate the difference between current and target
+            let diff = self.target_value - self.current_value;
 
-            // Reset gate outputs
-            self.end_of_rise_gate = false;
-            self.end_of_cycle_gate = false;
+            if diff.abs() > 0.001 {
+                // Determine if we're rising or falling
+                let is_rising = diff > 0.0;
+                let time_constant =
+                    if is_rising { effective_rise_time } else { effective_fall_time };
 
-            // Check if target changed (new slew cycle starting)
-            if (input_value - self.prev_target).abs() > 0.001 {
-                self.target_value = input_value;
-                self.prev_target = input_value;
-                self.is_slewing = true;
-            }
-
-            // Check if we're currently slewing
-            let currently_slewing = (self.current_value - self.target_value).abs() > 0.001;
-
-            if currently_slewing {
-                let is_rising = self.target_value > self.current_value;
-                let time_constant = if is_rising {
-                    rise_time.max(0.001) // Prevent division by zero
-                } else {
-                    fall_time.max(0.001)
-                };
-
-                // Calculate progress (0 to 1)
-                let distance = (self.target_value - self.current_value).abs();
+                // Calculate step size based on time constant
                 let step_size = 1.0 / (time_constant * self.sample_rate);
+                let raw_progress = step_size;
 
-                // Apply curve shaping to step size
-                let progress = 1.0 - distance; // 0 when far from target, 1 when close
-                let curve_factor = self.apply_curve(progress);
-                let shaped_step = step_size * curve_factor;
+                // Apply curve shaping
+                let shaped_progress = self.apply_curve(raw_progress);
+                let step = diff * shaped_progress.min(1.0);
 
-                let actual_step = shaped_step * (self.target_value - self.current_value);
-                self.current_value += actual_step;
+                self.current_value += step;
 
-                // Clamp to target if very close
-                if (self.current_value - self.target_value).abs() < 0.001 {
+                // Clamp to prevent overshoot
+                if (is_rising && self.current_value > self.target_value)
+                    || (!is_rising && self.current_value < self.target_value)
+                {
                     self.current_value = self.target_value;
-
-                    // We just finished slewing - trigger gates
-                    if self.is_slewing {
-                        self.end_of_cycle_gate = true;
-                        if is_rising {
-                            self.end_of_rise_gate = true;
-                        }
-                        self.is_slewing = false;
-                    }
                 }
             }
 
-            // Output the current value and gates
             out[i] = self.current_value;
-            eor_out[i] = if self.end_of_rise_gate { 1.0 } else { 0.0 };
-            eoc_out[i] = if self.end_of_cycle_gate { 1.0 } else { 0.0 };
         }
     }
 
@@ -1127,7 +1073,7 @@ impl GraphModule for GraphSlewGen {
                 self.set_curve_from_param(value);
                 Ok(())
             }
-            _ => Err(anyhow!("Unknown parameter: {}", name)),
+            _ => Err(anyhow!("Unknown parameter: {name}")),
         }
     }
 

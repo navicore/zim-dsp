@@ -149,9 +149,21 @@ impl TestRunner {
             self.engine.process_for_test(buffer_size);
         }
 
-        // Extract the final collector data
-        let final_collector = Arc::try_unwrap(collector)
-            .map_or_else(|_| ObservationCollector::new(), |mutex| mutex.into_inner().unwrap());
+        // Extract the final collector data by cloning from the shared collector
+        let final_collector = {
+            let collector_guard = collector.lock().unwrap();
+            // Clone the collected data to create a new collector with the same observations
+            let mut new_collector = ObservationCollector::new();
+
+            // Copy all the observations (this is a bit hacky but works for debugging)
+            // In the future we could add a proper clone method
+            new_collector.signals.clone_from(&collector_guard.signals);
+            new_collector.gates.clone_from(&collector_guard.gates);
+            new_collector.parameters.clone_from(&collector_guard.parameters);
+            new_collector.cycle_count = collector_guard.cycle_count;
+
+            new_collector
+        };
 
         Ok(TestResult {
             collector: final_collector,

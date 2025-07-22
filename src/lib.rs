@@ -8,4 +8,5 @@ pub mod graph_modules;
 pub mod modules;
 pub mod observability;
 pub mod parser;
+pub mod slew_tests;
 pub mod test_framework;

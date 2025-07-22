@@ -216,6 +216,7 @@ impl GraphExecutor {
 
         // Process each module in order
         for module_name in &self.execution_order {
+            println!("DEBUG: Processing module: {module_name}");
             if let Some(module) = self.modules.get_mut(module_name) {
                 // Prepare input buffers for this module
                 let module_inputs = self.input_buffers.get_mut(module_name).unwrap();
