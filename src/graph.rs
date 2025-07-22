@@ -12,6 +12,7 @@
 #![allow(clippy::module_name_repetitions)]
 #![allow(dead_code)] // Many parts are not yet used but will be
 
+use crate::observability::{ObserverManager, SignalObserver};
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 
@@ -170,6 +171,8 @@ pub struct GraphExecutor {
     output_buffers: HashMap<String, PortBuffers>,
     input_buffers: HashMap<String, PortBuffers>,
     execution_order: Vec<String>,
+    observers: ObserverManager,
+    current_cycle: usize,
 }
 
 impl GraphExecutor {
@@ -180,6 +183,8 @@ impl GraphExecutor {
             output_buffers: HashMap::new(),
             input_buffers: HashMap::new(),
             execution_order: Vec::new(),
+            observers: ObserverManager::new(),
+            current_cycle: 0,
         }
     }
 
@@ -192,12 +197,26 @@ impl GraphExecutor {
         self.connections.push(connection);
     }
 
+    /// Add an observer to monitor the graph execution
+    pub fn add_observer(&mut self, observer: Box<dyn SignalObserver>) {
+        self.observers.add_observer(observer);
+    }
+
+    /// Get mutable access to the observer manager
+    pub fn observer_manager_mut(&mut self) -> &mut ObserverManager {
+        &mut self.observers
+    }
+
     pub fn process(&mut self, sample_count: usize) {
+        // Notify observers of cycle start
+        self.observers.begin_process_cycle(self.current_cycle);
+
         // Initialize buffers
         self.prepare_buffers(sample_count);
 
         // Process each module in order
         for module_name in &self.execution_order {
+            println!("DEBUG: Processing module: {module_name}");
             if let Some(module) = self.modules.get_mut(module_name) {
                 // Prepare input buffers for this module
                 let module_inputs = self.input_buffers.get_mut(module_name).unwrap();
@@ -213,8 +232,29 @@ impl GraphExecutor {
                 // Process the module
                 let module_outputs = self.output_buffers.get_mut(module_name).unwrap();
                 module.process(module_inputs, module_outputs, sample_count);
+
+                // Observe output signals (sample some values, not all for performance)
+                // We need to collect the observation data first to avoid borrowing issues
+                let mut observations = Vec::new();
+                let sample_step = if sample_count > 128 { 64 } else { 1 };
+
+                for (port_name, buffer) in &module_outputs.buffers {
+                    for (i, &value) in buffer.iter().enumerate().step_by(sample_step) {
+                        let sample_index = self.current_cycle * sample_count + i;
+                        observations.push((port_name.clone(), sample_index, value));
+                    }
+                }
+
+                // Now observe the collected data
+                for (port_name, sample_index, value) in observations {
+                    self.observers.observe_signal(module_name, &port_name, sample_index, value);
+                }
             }
         }
+
+        // Notify observers of cycle end
+        self.observers.end_process_cycle(self.current_cycle);
+        self.current_cycle += 1;
     }
 
     fn prepare_buffers(&mut self, sample_count: usize) {
@@ -253,10 +293,17 @@ impl GraphExecutor {
         param_name: &str,
         value: f32,
     ) -> Result<()> {
-        self.modules.get_mut(module_name).map_or_else(
+        let result = self.modules.get_mut(module_name).map_or_else(
             || Err(anyhow!("Module '{module_name}' not found")),
             |module| module.set_param(param_name, value),
-        )
+        );
+
+        // Observe parameter changes
+        if result.is_ok() {
+            self.observers.observe_parameter(module_name, param_name, value);
+        }
+
+        result
     }
 
     /// Get information about a module's ports
@@ -359,6 +406,17 @@ impl GraphExecutor {
         }
 
         count
+    }
+
+    /// Observe a gate event from a module
+    pub fn observe_gate(
+        &mut self,
+        module_name: &str,
+        gate_name: &str,
+        sample_index: usize,
+        triggered: bool,
+    ) {
+        self.observers.observe_gate(module_name, gate_name, sample_index, triggered);
     }
 }
 

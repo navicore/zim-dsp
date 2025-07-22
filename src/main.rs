@@ -12,7 +12,9 @@ mod graph;
 mod graph_engine;
 mod graph_modules;
 mod modules;
+mod observability;
 mod parser;
+mod test_framework;
 
 use graph_engine::GraphEngine;
 
