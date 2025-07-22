@@ -1,0 +1,28 @@
+# Stereo mixer example - mix multiple sources with panning
+vco1: osc saw 220
+vco2: osc sine 330
+noise: noise
+
+# 3-channel stereo mixer
+stereo_mix: stereomix 3
+
+# Connect sources
+stereo_mix.l1 <- vco1.saw
+stereo_mix.l2 <- vco2.sine
+stereo_mix.l3 <- noise.white
+
+# Set levels
+stereo_mix.level1 <- 0.8
+stereo_mix.level2 <- 0.6
+stereo_mix.level3 <- 0.3
+
+# Pan positions
+stereo_mix.pan1 <- -0.8  # Saw wave mostly left
+stereo_mix.pan2 <- 0.8   # Sine wave mostly right
+stereo_mix.pan3 <- 0.0   # Noise in center
+
+# Stereo output
+out.left <- stereo_mix.left
+out.right <- stereo_mix.right
+start
+

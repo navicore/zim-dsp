@@ -1,0 +1,18 @@
+# Voltage-controlled panning example
+# LFO controls the stereo position of an oscillator
+
+vco: osc saw 440
+pan_lfo: lfo 0.3  # Slow panning sweep
+
+# Single-channel stereo mixer
+stereo_mix: stereomix 1
+
+# Connect audio and panning control
+stereo_mix.l1 <- vco.saw
+stereo_mix.pan1 <- pan_lfo.sine  # Sine wave controls pan position
+stereo_mix.level1 <- 0.7
+
+# Stereo output - you'll hear the saw wave sweep from left to right
+out.left <- stereo_mix.left
+out.right <- stereo_mix.right
+start

@@ -1,0 +1,7 @@
+# Simple test patch that works identically in both play and REPL modes
+# In play mode: auto-starts due to "start" command
+# In REPL mode: paste everything including "start"
+
+osc: osc sine 440
+out <- osc.sine * 0.3
+start
