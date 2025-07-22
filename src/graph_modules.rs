@@ -2063,3 +2063,155 @@ impl GraphModule for GraphSeq8 {
         }
     }
 }
+
+/// Stereo mixer with voltage-controlled panning
+/// Supports multiple stereo inputs with individual pan controls
+/// Uses constant-power panning laws for smooth stereo imaging
+pub struct GraphStereoMixer {
+    channels: usize,
+}
+
+impl GraphStereoMixer {
+    pub fn new(channels: usize) -> Self {
+        Self {
+            channels: channels.clamp(2, 8), // 2-8 channels
+        }
+    }
+}
+
+impl Default for GraphStereoMixer {
+    fn default() -> Self {
+        Self::new(4) // 4-channel stereo mixer by default
+    }
+}
+
+impl GraphModule for GraphStereoMixer {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        let mut inputs = Vec::new();
+
+        // Stereo inputs for each channel
+        for i in 1..=self.channels {
+            inputs.push(PortDescriptor {
+                name: format!("l{i}"),
+                default_value: 0.0,
+                description: format!("Channel {i} left input"),
+            });
+            inputs.push(PortDescriptor {
+                name: format!("r{i}"),
+                default_value: 0.0,
+                description: format!("Channel {i} right input"),
+            });
+            inputs.push(PortDescriptor {
+                name: format!("pan{i}"),
+                default_value: 0.0,
+                description: format!("Channel {i} pan control (-1=left, 0=center, +1=right)"),
+            });
+            inputs.push(PortDescriptor {
+                name: format!("level{i}"),
+                default_value: 1.0,
+                description: format!("Channel {i} level control"),
+            });
+        }
+
+        inputs
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "left".to_string(),
+                default_value: 0.0,
+                description: "Mixed left output".to_string(),
+            },
+            PortDescriptor {
+                name: "right".to_string(),
+                default_value: 0.0,
+                description: "Mixed right output".to_string(),
+            },
+        ]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        // Prepare output buffers
+        {
+            outputs.get_or_default("left", sample_count, 0.0);
+            outputs.get_or_default("right", sample_count, 0.0);
+        }
+
+        // Get mutable references to output buffers
+        let [left_out, right_out] = outputs.get_many_mut(["left", "right"]);
+        let left_out = left_out.expect("left output buffer should exist");
+        let right_out = right_out.expect("right output buffer should exist");
+
+        // Clear output buffers
+        for i in 0..sample_count {
+            left_out[i] = 0.0;
+            right_out[i] = 0.0;
+        }
+
+        // Mix each channel
+        for ch in 1..=self.channels {
+            // Get input buffers for this channel
+            let l_in = inputs.get(&format!("l{ch}")).map(|b| b.as_slice()).unwrap_or(&[]);
+            let r_in = inputs.get(&format!("r{ch}")).map(|b| b.as_slice()).unwrap_or(&[]);
+            let pan_in = inputs.get(&format!("pan{ch}")).map(|b| b.as_slice()).unwrap_or(&[]);
+            let level_in = inputs.get(&format!("level{ch}")).map(|b| b.as_slice()).unwrap_or(&[]);
+
+            for i in 0..sample_count {
+                // Get input values for this sample
+                let left_input = if i < l_in.len() { l_in[i] } else { 0.0 };
+                let right_input = if i < r_in.len() { r_in[i] } else { 0.0 };
+                let pan_cv = if i < pan_in.len() { pan_in[i] } else { 0.0 };
+                let level = if i < level_in.len() { level_in[i] } else { 1.0 };
+
+                // Clamp pan CV to valid range (-1 to +1)
+                let pan = pan_cv.clamp(-1.0, 1.0);
+
+                // Constant-power panning using sine/cosine laws
+                // Pan: -1 = full left, 0 = center, +1 = full right
+                // Convert to radians: -1 -> 0, 0 -> π/4, +1 -> π/2
+                let pan_angle = (pan + 1.0) * std::f32::consts::FRAC_PI_4; // 0 to π/2
+
+                let left_gain = pan_angle.cos(); // 1.0 at left, 0.707 at center, 0.0 at right
+                let right_gain = pan_angle.sin(); // 0.0 at left, 0.707 at center, 1.0 at right
+
+                // Apply panning and level to both input channels
+                // If input is mono (only left connected), pan it across stereo field
+                // If input is stereo, apply pan as stereo width control
+                let processed_left = if right_input.abs() < 1e-6 {
+                    // Mono input - pan across stereo field
+                    left_input * left_gain * level
+                } else {
+                    // Stereo input - blend according to pan
+                    (left_input * left_gain + right_input * (1.0 - right_gain)) * level
+                };
+
+                let processed_right = if right_input.abs() < 1e-6 {
+                    // Mono input - pan across stereo field
+                    left_input * right_gain * level
+                } else {
+                    // Stereo input - blend according to pan
+                    (right_input * right_gain + left_input * (1.0 - left_gain)) * level
+                };
+
+                // Mix into output
+                left_out[i] += processed_left;
+                right_out[i] += processed_right;
+            }
+        }
+    }
+
+    fn set_param(&mut self, _name: &str, _value: f32) -> Result<()> {
+        // No static parameters - all control via CV
+        Ok(())
+    }
+
+    fn get_param(&self, _name: &str) -> Option<f32> {
+        // No static parameters
+        None
+    }
+}

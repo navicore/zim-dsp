@@ -3,8 +3,8 @@
 use crate::graph::{Connection, ConnectionExpr, GraphExecutor, ModuleInfo};
 use crate::graph_modules::{
     GraphClockDiv, GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphMonoMixer,
-    GraphMult, GraphNoiseGen, GraphOscillator, GraphSeq8, GraphSlewGen, GraphStereoOutput,
-    GraphSwitch, GraphVca, GraphVisual,
+    GraphMult, GraphNoiseGen, GraphOscillator, GraphSeq8, GraphSlewGen, GraphStereoMixer,
+    GraphStereoOutput, GraphSwitch, GraphVca, GraphVisual,
 };
 use crate::modules::ModuleType;
 use crate::observability::SignalObserver;
@@ -261,6 +261,12 @@ impl GraphEngine {
                 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                 let input_count = params.first().copied().unwrap_or(4.0) as usize;
                 Box::new(GraphMonoMixer::new(input_count))
+            }
+            ModuleType::StereoMixer => {
+                // Default to 4-channel stereo mixer, or use parameter if provided
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let channel_count = params.first().copied().unwrap_or(4.0) as usize;
+                Box::new(GraphStereoMixer::new(channel_count))
             }
             ModuleType::Slew => {
                 // Default rise/fall times, or use parameters if provided
