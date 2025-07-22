@@ -164,4 +164,101 @@ mod tests {
         let range = result.collector.signal_range("slew", "out");
         assert!(range.is_some(), "Should produce reasonable output range");
     }
+
+    #[test]
+    fn test_slew_gate_outputs() {
+        let mut runner = TestRunner::new();
+
+        // Test gate outputs with slow LFO and fast slew to ensure target reaching
+        // The key insight: slew time must be much shorter than LFO period for reliable gate firing
+        let patch = r"
+            lfo: lfo 0.5  
+            slew: slew 0.05 0.05  
+            slew.in <- lfo.square
+            out <- slew.out
+            eor_out <- slew.eor
+            eoc_out <- slew.eoc
+        ";
+
+        let result = runner
+            .run_patch(patch, Duration::from_secs(4))
+            .expect("Patch should load and run successfully");
+
+        // Basic functionality should still work
+        assert!(result.collector.signal_varied("slew", "out"), "Slew output should vary");
+
+        // Gate outputs should fire
+        assert!(result.collector.gate_fired("slew", "eor"), "End-of-rise gate should fire");
+        assert!(result.collector.gate_fired("slew", "eoc"), "End-of-cycle gate should fire");
+
+        // Count gate fires
+        let rise_gate_fires = result.gate_fire_count("slew", "eor");
+        let cycle_gate_fires = result.gate_fire_count("slew", "eoc");
+
+        assert!(rise_gate_fires > 0, "EOR should fire at least once (got {rise_gate_fires})");
+        assert!(cycle_gate_fires > 0, "EOC should fire at least once (got {cycle_gate_fires})");
+
+        // With a 0.5Hz LFO over 4 seconds, we should get roughly 1-2 complete cycles
+        assert!(
+            (1..=3).contains(&rise_gate_fires),
+            "EOR count should be 1-3 for 4 second test (got {rise_gate_fires})"
+        );
+        assert!(
+            (1..=3).contains(&cycle_gate_fires),
+            "EOC count should be 1-3 for 4 second test (got {cycle_gate_fires})"
+        );
+    }
+
+    /// Test the critical self-patching oscillator behavior
+    /// This test verifies that slew.in <- slew.eor creates a self-sustaining triangle oscillator
+    /// This functionality is essential for audio-rate modular synthesis applications
+    #[test]
+    fn test_slew_self_patching_oscillator() {
+        let patch = r"
+            # Self-patching slew oscillator - the core test for bootstrap behavior
+            slew: slew 0.01 0.01
+            slew.in <- slew.eor  # This is the key self-patching connection
+            
+            # Output for monitoring
+            out <- slew.out
+            gates <- slew.eor
+        ";
+
+        let mut runner = TestRunner::new();
+        let result = runner
+            .run_patch(patch, Duration::from_millis(100))
+            .expect("Self-patching slew oscillator should run successfully");
+
+        // The critical test: self-patching must create oscillation
+        assert!(
+            result.collector.signal_varied("slew", "out"),
+            "Self-patching slew generator should create oscillating output"
+        );
+
+        // Gates must fire for self-patching to work
+        assert!(
+            result.collector.gate_fired("slew", "eor"),
+            "Self-patching requires EOR gates to fire"
+        );
+
+        // Should see multiple gate fires indicating sustained oscillation
+        let gate_count = result.gate_fire_count("slew", "eor");
+        assert!(
+            gate_count > 2,
+            "Self-patching oscillator should fire multiple gates (got {gate_count})"
+        );
+
+        // Verify we get reasonable signal range for triangle wave
+        let values = result.collector.get_signal_values("slew", "out");
+        assert!(!values.is_empty(), "Should capture slew output values");
+
+        let min = values.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+        let max = values.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+        let range = max - min;
+
+        assert!(
+            range > 0.5,
+            "Self-patching triangle should have reasonable amplitude range (got {range})"
+        );
+    }
 }
