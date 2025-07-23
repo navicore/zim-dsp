@@ -38,6 +38,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn play_patch(patch_file: &str) -> Result<()> {
     println!("Loading patch: {patch_file}");
 
@@ -71,7 +72,7 @@ fn play_patch(patch_file: &str) -> Result<()> {
         println!("===============");
         for line in filtered_patch_content.lines() {
             if !line.trim().is_empty() && !line.trim().starts_with('#') {
-                println!("  {}", line);
+                println!("  {line}");
             }
         }
         println!("===============");
@@ -112,64 +113,67 @@ fn play_patch(patch_file: &str) -> Result<()> {
                     // Add to history
                     let _ = rl.add_history_entry(&line);
 
-            match command {
-                "start" => {
-                    engine.start()?;
-                    println!("Audio started");
-                }
-                "stop" => {
-                    engine.stop();
-                    println!("Audio stopped");
-                }
-                "quit" | "exit" => {
-                    engine.stop();
-                    println!("Goodbye!");
-                    break;
-                }
-                "help" => {
-                    println!("Available commands:");
-                    println!("  start - Start audio playback");
-                    println!("  stop  - Stop audio playback");
-                    println!("  inspect <name> - Inspect module ports");
-                    println!("  quit  - Exit program");
-                }
-                "" => {} // Empty input, continue
-                _ if command.starts_with("inspect ") => {
-                    let module_name = command.strip_prefix("inspect ").unwrap().trim();
-                    if let Some(info) = engine.inspect_module(module_name) {
-                        println!("Module: {}", info.name);
-                        println!("  Inputs:");
-                        for input in &info.inputs {
+                    match command {
+                        "start" => {
+                            engine.start()?;
+                            println!("Audio started");
+                        }
+                        "stop" => {
+                            engine.stop();
+                            println!("Audio stopped");
+                        }
+                        "quit" | "exit" => {
+                            engine.stop();
+                            println!("Goodbye!");
+                            break;
+                        }
+                        "help" => {
+                            println!("Available commands:");
+                            println!("  start - Start audio playback");
+                            println!("  stop  - Stop audio playback");
+                            println!("  inspect <name> - Inspect module ports");
+                            println!("  quit  - Exit program");
+                        }
+                        "" => {} // Empty input, continue
+                        _ if command.starts_with("inspect ") => {
+                            let module_name = command.strip_prefix("inspect ").unwrap().trim();
+                            if let Some(info) = engine.inspect_module(module_name) {
+                                println!("Module: {}", info.name);
+                                println!("  Inputs:");
+                                for input in &info.inputs {
+                                    println!(
+                                        "    - {} (default: {}): {}",
+                                        input.name, input.default_value, input.description
+                                    );
+                                }
+                                println!("  Outputs:");
+                                for output in &info.outputs {
+                                    println!("    - {}: {}", output.name, output.description);
+                                }
+                            } else if let Some(info) = GraphEngine::inspect_module_type(module_name)
+                            {
+                                println!("Module Type: {module_name}");
+                                println!("  Inputs:");
+                                for input in &info.inputs {
+                                    println!(
+                                        "    - {} (default: {}): {}",
+                                        input.name, input.default_value, input.description
+                                    );
+                                }
+                                println!("  Outputs:");
+                                for output in &info.outputs {
+                                    println!("    - {}: {}", output.name, output.description);
+                                }
+                            } else {
+                                eprintln!("Module or module type '{module_name}' not found");
+                            }
+                        }
+                        _ => {
                             println!(
-                                "    - {} (default: {}): {}",
-                                input.name, input.default_value, input.description
+                                "Unknown command: '{command}'. Type 'help' for available commands."
                             );
                         }
-                        println!("  Outputs:");
-                        for output in &info.outputs {
-                            println!("    - {}: {}", output.name, output.description);
-                        }
-                    } else if let Some(info) = GraphEngine::inspect_module_type(module_name) {
-                        println!("Module Type: {module_name}");
-                        println!("  Inputs:");
-                        for input in &info.inputs {
-                            println!(
-                                "    - {} (default: {}): {}",
-                                input.name, input.default_value, input.description
-                            );
-                        }
-                        println!("  Outputs:");
-                        for output in &info.outputs {
-                            println!("    - {}: {}", output.name, output.description);
-                        }
-                    } else {
-                        eprintln!("Module or module type '{module_name}' not found");
                     }
-                }
-                _ => {
-                    println!("Unknown command: '{command}'. Type 'help' for available commands.");
-                }
-            }
                 }
                 Err(ReadlineError::Interrupted) => {
                     println!("CTRL-C");
