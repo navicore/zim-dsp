@@ -21,6 +21,7 @@ pub enum ModuleType {
     Mult,
     Switch,
     ClockDiv,
+    SampleHold,
 }
 
 impl std::fmt::Display for ModuleType {
@@ -43,6 +44,7 @@ impl std::fmt::Display for ModuleType {
             Self::Mult => write!(f, "mult"),
             Self::Switch => write!(f, "switch"),
             Self::ClockDiv => write!(f, "clockdiv"),
+            Self::SampleHold => write!(f, "samplehold"),
         }
     }
 }
@@ -69,6 +71,7 @@ pub fn parse_module_type(s: &str) -> Result<ModuleType> {
         "mult" | "multiple" => Ok(ModuleType::Mult),
         "switch" | "seq_switch" => Ok(ModuleType::Switch),
         "clockdiv" | "clock_div" | "divider" => Ok(ModuleType::ClockDiv),
+        "samplehold" | "sample_hold" | "sh" => Ok(ModuleType::SampleHold),
         _ => Err(anyhow!("Unknown module type: {s}")),
     }
 }

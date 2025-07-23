@@ -37,3 +37,4 @@ vca.audio <- vco.sine
 vca.cv <- env.out
 
 out <- vca.out
+start

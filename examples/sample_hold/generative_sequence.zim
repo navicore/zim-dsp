@@ -1,0 +1,40 @@
+# Generative Sequence using Sample and Hold
+# Creates an evolving musical sequence by sampling noise at different rates
+
+# Basic working foundation
+osc: osc saw 440
+env: envelope 0.01 0.3
+gate: lfo 2  # Base rhythm
+env.gate <- gate.gate
+
+# VCA to apply envelope
+vca: vca
+vca.audio <- osc.saw
+vca.cv <- env.out
+
+# Sample and hold for pitch variation
+pitch_noise: noise
+pitch_clock: lfo 0.8   # Slow pitch changes
+pitch_sh: samplehold
+pitch_sh.signal <- pitch_noise.white
+pitch_sh.gate <- pitch_clock.gate
+
+# Apply pitch modulation (smaller range for stability)
+osc.freq <- pitch_sh.out * 150 + 440  # Range: 290-590 Hz
+
+# Add filter with sample and hold modulation
+vcf: filter 1200
+vcf.audio <- vca.out  # Filter the VCA output, not the raw oscillator
+
+filter_noise: noise
+filter_clock: lfo 1.2
+filter_sh: samplehold
+filter_sh.signal <- filter_noise.pink
+filter_sh.gate <- filter_clock.gate
+
+# Apply filter modulation (safe range)
+vcf.cutoff <- filter_sh.out * 400 + 1200  # Range: 800-1600 Hz
+
+# Simple output with some attenuation
+out <- vcf.lp * 0.3
+#start

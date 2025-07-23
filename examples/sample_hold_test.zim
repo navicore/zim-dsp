@@ -1,0 +1,18 @@
+# Simple Sample and Hold Test
+# LFO provides both the signal to sample and the gate trigger
+
+lfo: lfo 0.5  # Slow LFO as signal source
+clock: lfo 4  # Faster clock for sampling
+
+# Sample and hold
+sh: samplehold
+sh.signal <- lfo.sine    # Sample the LFO sine wave
+sh.gate <- clock.gate    # Trigger sampling with clock
+
+# Use the held value to control oscillator frequency
+osc: osc saw
+osc.freq <- sh.out * 200 + 440  # Map to 240-640 Hz range
+
+# Output with some attenuation
+out <- osc.saw * 0.3
+start

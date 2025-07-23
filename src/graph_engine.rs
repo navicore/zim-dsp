@@ -3,8 +3,8 @@
 use crate::graph::{Connection, ConnectionExpr, GraphExecutor, ModuleInfo};
 use crate::graph_modules::{
     GraphClockDiv, GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphMonoMixer,
-    GraphMult, GraphNoiseGen, GraphOscillator, GraphSeq8, GraphSlewGen, GraphStereoMixer,
-    GraphStereoOutput, GraphSwitch, GraphVca, GraphVisual,
+    GraphMult, GraphNoiseGen, GraphOscillator, GraphSampleHold, GraphSeq8, GraphSlewGen,
+    GraphStereoMixer, GraphStereoOutput, GraphSwitch, GraphVca, GraphVisual,
 };
 use crate::modules::ModuleType;
 use crate::observability::SignalObserver;
@@ -196,6 +196,10 @@ impl GraphEngine {
                 // module.port + constant
                 let base = Self::parse_connection_expr(left)?;
                 return Ok(ConnectionExpr::Offset { expr: Box::new(base), offset });
+            } else if let Ok(offset) = left.parse::<f32>() {
+                // constant + module.port
+                let base = Self::parse_connection_expr(right)?;
+                return Ok(ConnectionExpr::Offset { expr: Box::new(base), offset });
             }
         }
 
@@ -206,6 +210,10 @@ impl GraphEngine {
             if let Ok(factor) = right.parse::<f32>() {
                 // module.port * constant
                 let base = Self::parse_connection_expr(left)?;
+                return Ok(ConnectionExpr::Scaled { expr: Box::new(base), factor });
+            } else if let Ok(factor) = left.parse::<f32>() {
+                // constant * module.port
+                let base = Self::parse_connection_expr(right)?;
                 return Ok(ConnectionExpr::Scaled { expr: Box::new(base), factor });
             }
         }
@@ -289,6 +297,7 @@ impl GraphEngine {
                 let division = params.first().copied().unwrap_or(4.0) as usize;
                 Box::new(GraphClockDiv::new(division))
             }
+            ModuleType::SampleHold => Box::new(GraphSampleHold::new()),
             ModuleType::Output => {
                 return Err(anyhow!("Module type {:?} not yet implemented", module_type))
             }
@@ -414,7 +423,65 @@ impl GraphEngine {
         self.graph.lock().unwrap().inspect_module(name)
     }
 
-    /// Validate all connections
+    /// Inspect a module type (e.g., "osc", "filter") by creating a temporary instance
+    ///
+    /// # Panics
+    /// Panics if module creation fails
+    #[must_use]
+    pub fn inspect_module_type(module_type_name: &str) -> Option<ModuleInfo> {
+        use crate::modules::ModuleType;
+
+        // Try to parse the module type
+        let module_type = match module_type_name {
+            "osc" | "oscillator" => ModuleType::Oscillator,
+            "filter" | "vcf" => ModuleType::Filter,
+            "envelope" | "env" => ModuleType::Envelope,
+            "vca" => ModuleType::Vca,
+            "lfo" => ModuleType::Lfo,
+            "gate" | "manual_gate" => ModuleType::ManualGate,
+            "stereo_output" | "stereo" => ModuleType::StereoOutput,
+            "noise" => ModuleType::Noise,
+            "mixer" => ModuleType::Mixer,
+            "stereo_mixer" => ModuleType::StereoMixer,
+            "slew" => ModuleType::Slew,
+            "seq8" | "sequencer" => ModuleType::Seq8,
+            "visual" => ModuleType::Visual,
+            "mult" | "multiple" => ModuleType::Mult,
+            "switch" => ModuleType::Switch,
+            "clockdiv" | "clock_div" => ModuleType::ClockDiv,
+            "samplehold" | "sample_hold" | "sh" => ModuleType::SampleHold,
+            _ => return None,
+        };
+
+        // Create a temporary module to inspect its interface
+        let temp_module: Box<dyn crate::graph::GraphModule> = match module_type {
+            ModuleType::Oscillator => Box::new(crate::graph_modules::GraphOscillator::new(440.0)),
+            ModuleType::Filter => Box::new(crate::graph_modules::GraphFilter::new(1000.0, 0.5)),
+            ModuleType::Envelope => Box::new(crate::graph_modules::GraphEnvelope::new(0.01, 0.1)),
+            ModuleType::Vca => Box::new(crate::graph_modules::GraphVca::new(1.0)),
+            ModuleType::Lfo => Box::new(crate::graph_modules::GraphLfo::new(1.0)),
+            ModuleType::ManualGate => Box::new(crate::graph_modules::GraphManualGate::new()),
+            ModuleType::StereoOutput => Box::new(crate::graph_modules::GraphStereoOutput::new()),
+            ModuleType::Noise => Box::new(crate::graph_modules::GraphNoiseGen::new()),
+            ModuleType::Mixer => Box::new(crate::graph_modules::GraphMonoMixer::new(4)),
+            ModuleType::StereoMixer => Box::new(crate::graph_modules::GraphStereoMixer::new(4)),
+            ModuleType::Slew => Box::new(crate::graph_modules::GraphSlewGen::new(0.1, 0.1)),
+            ModuleType::Seq8 => Box::new(crate::graph_modules::GraphSeq8::new()),
+            ModuleType::Visual => Box::new(crate::graph_modules::GraphVisual::new()),
+            ModuleType::Mult => Box::new(crate::graph_modules::GraphMult::new()),
+            ModuleType::Switch => Box::new(crate::graph_modules::GraphSwitch::new(4)),
+            ModuleType::ClockDiv => Box::new(crate::graph_modules::GraphClockDiv::new(4)),
+            ModuleType::SampleHold => Box::new(crate::graph_modules::GraphSampleHold::new()),
+            ModuleType::Output => return None, // Not implemented
+        };
+
+        Some(ModuleInfo {
+            name: module_type_name.to_string(),
+            inputs: temp_module.inputs(),
+            outputs: temp_module.outputs(),
+        })
+    }
+
     /// Validate all connections
     ///
     /// # Panics
