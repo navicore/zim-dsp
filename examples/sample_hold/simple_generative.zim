@@ -1,0 +1,20 @@
+osc: osc saw 440
+env: envelope 0.01 0.3
+gate: lfo 4
+env.gate <- gate.gate
+
+vca: vca
+vca.audio <- osc.saw
+vca.cv <- env.out
+
+pitch_noise: noise
+
+pitch_sh: samplehold
+pitch_sh.signal <- pitch_noise.white
+pitch_sh.gate <- gate.gate
+
+osc.freq <- pitch_sh.out * 100 + 440
+
+# Simple output
+out <- vca.out
+start

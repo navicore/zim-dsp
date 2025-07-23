@@ -24,3 +24,4 @@ vca.cv <- env.out
 
 # Connect VCA output to audio out
 out <- vca.out
+start

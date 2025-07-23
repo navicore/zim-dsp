@@ -3,8 +3,8 @@
 use crate::graph::{Connection, ConnectionExpr, GraphExecutor, ModuleInfo};
 use crate::graph_modules::{
     GraphClockDiv, GraphEnvelope, GraphFilter, GraphLfo, GraphManualGate, GraphMonoMixer,
-    GraphMult, GraphNoiseGen, GraphOscillator, GraphSeq8, GraphSlewGen, GraphStereoMixer,
-    GraphStereoOutput, GraphSwitch, GraphVca, GraphVisual,
+    GraphMult, GraphNoiseGen, GraphOscillator, GraphSampleHold, GraphSeq8, GraphSlewGen,
+    GraphStereoMixer, GraphStereoOutput, GraphSwitch, GraphVca, GraphVisual,
 };
 use crate::modules::ModuleType;
 use crate::observability::SignalObserver;
@@ -196,6 +196,10 @@ impl GraphEngine {
                 // module.port + constant
                 let base = Self::parse_connection_expr(left)?;
                 return Ok(ConnectionExpr::Offset { expr: Box::new(base), offset });
+            } else if let Ok(offset) = left.parse::<f32>() {
+                // constant + module.port
+                let base = Self::parse_connection_expr(right)?;
+                return Ok(ConnectionExpr::Offset { expr: Box::new(base), offset });
             }
         }
 
@@ -206,6 +210,10 @@ impl GraphEngine {
             if let Ok(factor) = right.parse::<f32>() {
                 // module.port * constant
                 let base = Self::parse_connection_expr(left)?;
+                return Ok(ConnectionExpr::Scaled { expr: Box::new(base), factor });
+            } else if let Ok(factor) = left.parse::<f32>() {
+                // constant * module.port
+                let base = Self::parse_connection_expr(right)?;
                 return Ok(ConnectionExpr::Scaled { expr: Box::new(base), factor });
             }
         }
@@ -289,6 +297,7 @@ impl GraphEngine {
                 let division = params.first().copied().unwrap_or(4.0) as usize;
                 Box::new(GraphClockDiv::new(division))
             }
+            ModuleType::SampleHold => Box::new(GraphSampleHold::new()),
             ModuleType::Output => {
                 return Err(anyhow!("Module type {:?} not yet implemented", module_type))
             }

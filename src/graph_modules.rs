@@ -2215,3 +2215,104 @@ impl GraphModule for GraphStereoMixer {
         None
     }
 }
+
+/// Sample and Hold module with gate trigger
+/// Captures and holds input voltage when gate goes high
+pub struct GraphSampleHold {
+    current_value: f32,
+    last_gate_value: f32,
+}
+
+impl GraphSampleHold {
+    pub fn new() -> Self {
+        Self { current_value: 0.0, last_gate_value: 0.0 }
+    }
+}
+
+impl Default for GraphSampleHold {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphModule for GraphSampleHold {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn inputs(&self) -> Vec<PortDescriptor> {
+        vec![
+            PortDescriptor {
+                name: "signal".to_string(),
+                default_value: 0.0,
+                description: "Input signal to sample".to_string(),
+            },
+            PortDescriptor {
+                name: "gate".to_string(),
+                default_value: 0.0,
+                description: "Gate trigger - samples on positive edge".to_string(),
+            },
+        ]
+    }
+
+    fn outputs(&self) -> Vec<PortDescriptor> {
+        vec![PortDescriptor {
+            name: "out".to_string(),
+            default_value: 0.0,
+            description: "Held output value".to_string(),
+        }]
+    }
+
+    fn process(&mut self, inputs: &PortBuffers, outputs: &mut PortBuffers, sample_count: usize) {
+        let signal_buffer = inputs.get("signal").map(|b| b.as_slice()).unwrap_or(&[]);
+        let gate_buffer = inputs.get("gate").map(|b| b.as_slice()).unwrap_or(&[]);
+        let output_buffer = outputs.get_or_default("out", sample_count, self.current_value);
+
+        for i in 0..sample_count {
+            let signal = if signal_buffer.is_empty() {
+                0.0
+            } else if i < signal_buffer.len() {
+                signal_buffer[i]
+            } else {
+                signal_buffer[signal_buffer.len() - 1]
+            };
+
+            let gate = if gate_buffer.is_empty() {
+                0.0
+            } else if i < gate_buffer.len() {
+                gate_buffer[i]
+            } else {
+                gate_buffer[gate_buffer.len() - 1]
+            };
+
+            // Detect positive edge (gate goes from low to high)
+            if gate > 0.5 && self.last_gate_value <= 0.5 {
+                // Sample the current input value
+                self.current_value = signal;
+            }
+
+            self.last_gate_value = gate;
+            output_buffer[i] = self.current_value;
+        }
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) -> Result<()> {
+        match name {
+            "reset" => {
+                // Allow manual reset
+                if value > 0.5 {
+                    self.current_value = 0.0;
+                }
+                Ok(())
+            }
+            _ => Err(anyhow::anyhow!("Unknown parameter: {name}")),
+        }
+    }
+
+    fn get_param(&self, name: &str) -> Option<f32> {
+        match name {
+            "current_value" => Some(self.current_value),
+            _ => None,
+        }
+    }
+}

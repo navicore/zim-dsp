@@ -34,6 +34,12 @@ install-deps:
 build:
 	cargo build --verbose
 
+# Build the project
+install-local:
+	cargo install --path .
+
+install: build install-local
+
 # Build release version
 release:
 	cargo build --release --verbose

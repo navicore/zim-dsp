@@ -1,0 +1,44 @@
+# Sample and Hold with Noise Sources
+# Demonstrates capturing random voltages from different noise types
+
+# Noise sources
+white: noise
+pink: noise  
+
+# Clock for triggering sample and hold
+clock: lfo 2  # 2 Hz sampling rate
+
+# Sample and hold modules
+sh_white: samplehold
+sh_pink: samplehold
+
+# Connect noise to sample inputs
+sh_white.signal <- white.white
+sh_pink.signal <- pink.pink
+
+# Use the same clock for both
+sh_white.gate <- clock.gate
+sh_pink.gate <- clock.gate  
+
+# Create oscillators controlled by the sampled noise
+osc1: osc saw
+osc2: osc sine
+
+# Map the sampled values to frequency (scale and offset for musical range)
+# Sample values are roughly -1 to +1, map to 200-800 Hz range  
+osc1.freq <- sh_white.out * 300 + 500
+osc2.freq <- sh_pink.out * 300 + 500
+
+# Stereo mix with different pan positions
+stereo: stereomix 2
+stereo.l1 <- osc1.saw
+stereo.l2 <- osc2.sine
+stereo.pan1 <- -0.7  # White noise oscillator mostly left
+stereo.pan2 <- 0.7   # Pink noise oscillator mostly right
+stereo.level1 <- 0.4
+stereo.level2 <- 0.4
+
+# Output
+out.left <- stereo.left
+out.right <- stereo.right
+start
