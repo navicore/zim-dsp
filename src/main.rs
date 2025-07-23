@@ -67,14 +67,40 @@ fn play_patch(patch_file: &str) -> Result<()> {
         // Interactive mode for scripts without "start"
         println!("Patch loaded successfully.");
         println!("Commands: 'start' to begin audio, 'stop' to stop, 'quit' to exit");
+        println!("Vi mode enabled: ESC for normal mode, 'i' for insert mode");
+
+        // Configure rustyline with Vi mode
+        let config = Config::builder()
+            .edit_mode(EditMode::Vi)
+            .history_ignore_space(true)
+            .max_history_size(1000)?
+            .build();
+
+        let mut rl = Editor::<(), _>::with_config(config)?;
+
+        // Load history if it exists
+        let history_path = dirs::home_dir().map(|mut path| {
+            path.push(".zim_dsp_history");
+            path
+        });
+
+        if let Some(ref path) = history_path {
+            let _ = rl.load_history(path);
+        }
 
         loop {
-            print!("> ");
-            std::io::Write::flush(&mut std::io::stdout())?;
+            let readline = rl.readline("> ");
 
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input)?;
-            let command = input.trim();
+            match readline {
+                Ok(line) => {
+                    let command = line.trim();
+
+                    if command.is_empty() {
+                        continue;
+                    }
+
+                    // Add to history
+                    let _ = rl.add_history_entry(&line);
 
             match command {
                 "start" => {
@@ -94,13 +120,65 @@ fn play_patch(patch_file: &str) -> Result<()> {
                     println!("Available commands:");
                     println!("  start - Start audio playback");
                     println!("  stop  - Stop audio playback");
+                    println!("  inspect <name> - Inspect module ports");
                     println!("  quit  - Exit program");
                 }
                 "" => {} // Empty input, continue
+                _ if command.starts_with("inspect ") => {
+                    let module_name = command.strip_prefix("inspect ").unwrap().trim();
+                    if let Some(info) = engine.inspect_module(module_name) {
+                        println!("Module: {}", info.name);
+                        println!("  Inputs:");
+                        for input in &info.inputs {
+                            println!(
+                                "    - {} (default: {}): {}",
+                                input.name, input.default_value, input.description
+                            );
+                        }
+                        println!("  Outputs:");
+                        for output in &info.outputs {
+                            println!("    - {}: {}", output.name, output.description);
+                        }
+                    } else if let Some(info) = GraphEngine::inspect_module_type(module_name) {
+                        println!("Module Type: {module_name}");
+                        println!("  Inputs:");
+                        for input in &info.inputs {
+                            println!(
+                                "    - {} (default: {}): {}",
+                                input.name, input.default_value, input.description
+                            );
+                        }
+                        println!("  Outputs:");
+                        for output in &info.outputs {
+                            println!("    - {}: {}", output.name, output.description);
+                        }
+                    } else {
+                        eprintln!("Module or module type '{module_name}' not found");
+                    }
+                }
                 _ => {
                     println!("Unknown command: '{command}'. Type 'help' for available commands.");
                 }
             }
+                }
+                Err(ReadlineError::Interrupted) => {
+                    println!("CTRL-C");
+                    break;
+                }
+                Err(ReadlineError::Eof) => {
+                    println!("CTRL-D");
+                    break;
+                }
+                Err(err) => {
+                    println!("Error: {err:?}");
+                    break;
+                }
+            }
+        }
+
+        // Save history
+        if let Some(ref path) = history_path {
+            let _ = rl.save_history(path);
         }
     }
 
@@ -217,8 +295,22 @@ fn run_repl() -> Result<()> {
                                 for output in &info.outputs {
                                     println!("    - {}: {}", output.name, output.description);
                                 }
+                            } else if let Some(info) = GraphEngine::inspect_module_type(module_name)
+                            {
+                                println!("Module Type: {module_name}");
+                                println!("  Inputs:");
+                                for input in &info.inputs {
+                                    println!(
+                                        "    - {} (default: {}): {}",
+                                        input.name, input.default_value, input.description
+                                    );
+                                }
+                                println!("  Outputs:");
+                                for output in &info.outputs {
+                                    println!("    - {}: {}", output.name, output.description);
+                                }
                             } else {
-                                eprintln!("Module '{module_name}' not found");
+                                eprintln!("Module or module type '{module_name}' not found");
                             }
                         } else {
                             // Try to parse as patch command
@@ -285,7 +377,7 @@ fn print_repl_help() {
     release/r - Turn off manual gates
     clear     - Clear current patch
     list      - List all modules
-    inspect   - Inspect a module's ports
+    inspect <name> - Inspect module ports (e.g., 'inspect osc1' or 'inspect osc')
     validate  - Validate all connections
     quit      - Exit REPL
     
