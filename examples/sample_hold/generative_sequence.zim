@@ -37,4 +37,4 @@ vcf.cutoff <- filter_sh.out * 400 + 1200  # Range: 800-1600 Hz
 
 # Simple output with some attenuation
 out <- vcf.lp * 0.3
-start
+#start

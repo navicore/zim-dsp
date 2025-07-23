@@ -66,6 +66,16 @@ fn play_patch(patch_file: &str) -> Result<()> {
     } else {
         // Interactive mode for scripts without "start"
         println!("Patch loaded successfully.");
+        println!();
+        println!("Patch contents:");
+        println!("===============");
+        for line in filtered_patch_content.lines() {
+            if !line.trim().is_empty() && !line.trim().starts_with('#') {
+                println!("  {}", line);
+            }
+        }
+        println!("===============");
+        println!();
         println!("Commands: 'start' to begin audio, 'stop' to stop, 'quit' to exit");
         println!("Vi mode enabled: ESC for normal mode, 'i' for insert mode");
 
