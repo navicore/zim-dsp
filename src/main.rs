@@ -8,15 +8,7 @@ use anyhow::Result;
 use rustyline::error::ReadlineError;
 use rustyline::{Config, EditMode, Editor};
 
-mod graph;
-mod graph_engine;
-mod graph_modules;
-mod modules;
-mod observability;
-mod parser;
-mod test_framework;
-
-use graph_engine::GraphEngine;
+use zim_dsp::graph_engine::GraphEngine;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -42,7 +34,7 @@ fn main() -> Result<()> {
 fn play_patch(patch_file: &str) -> Result<()> {
     println!("Loading patch: {patch_file}");
 
-    let mut engine = GraphEngine::new();
+    let mut engine = GraphEngine::from_patch_file(patch_file);
     let patch_content = std::fs::read_to_string(patch_file)?;
 
     // Check if the patch contains a "start" command

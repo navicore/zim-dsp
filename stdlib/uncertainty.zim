@@ -1,0 +1,44 @@
+# Uncertainty - Random CV and Gate Generator
+# Inspired by the Buchla Source of Uncertainty
+# Generates random control voltages and gate patterns
+#
+# Patchbay connections (textual inclusion approach):
+# - patchbay.in1: Clock rate control (Hz)
+# - patchbay.in2: Smoothing amount (0-1) 
+# - patchbay.out1: Random CV output
+# - patchbay.out2: Random gate output
+
+# Patchbay routing module (4 inputs, 4 outputs)
+patchbay: mult 4
+
+# Internal clock for driving randomness
+internal_clock: lfo square 2.0
+
+# Random voltage source
+random_noise: noise white
+random_sh: samplehold
+random_sh.signal <- random_noise.white
+random_sh.gate <- internal_clock.square
+
+# Smooth the random CV with voltage-controlled slew
+smooth_slew: slew 0.1 0.1
+smooth_slew.signal <- random_sh.out
+smooth_slew.rise <- patchbay.out2 * 0.5
+smooth_slew.fall <- patchbay.out2 * 0.5
+
+# Generate random gates - use second noise source for independence
+gate_noise: noise white
+gate_sh: samplehold  
+gate_sh.signal <- gate_noise.white
+gate_sh.gate <- internal_clock.square
+
+# Convert random voltage to gate (threshold at 0)
+gate_thresh: mult 1
+gate_thresh.in1 <- gate_sh.out
+
+# Connect patchbay inputs to rate and smoothing controls
+internal_clock.freq <- patchbay.out1     # Rate control from external
+
+# Connect outputs to patchbay for external access  
+patchbay.in3 <- smooth_slew.out          # CV output to external
+patchbay.in4 <- gate_thresh.out          # Gate output to external

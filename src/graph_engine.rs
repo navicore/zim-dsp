@@ -6,11 +6,13 @@ use crate::graph_modules::{
     GraphMult, GraphNoiseGen, GraphOscillator, GraphSampleHold, GraphSeq8, GraphSlewGen,
     GraphStereoMixer, GraphStereoOutput, GraphSwitch, GraphVca, GraphVisual,
 };
+use crate::module_loader::{LoadedModule, ModuleLoader};
 use crate::modules::ModuleType;
 use crate::observability::SignalObserver;
-use crate::parser::{parse_line, Command};
+use crate::parser::{parse_line, Command, ModuleTypeRef, PatchbayDef};
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 /// Audio engine using the new graph executor
@@ -25,6 +27,10 @@ pub struct GraphEngine {
     output_port: Option<String>,
     // Track if we have a stereo output module
     has_stereo_output: bool,
+    // Module loading system
+    module_loader: ModuleLoader,
+    // Store imported module interfaces by alias or path
+    imported_modules: HashMap<String, PatchbayDef>,
 }
 
 impl Default for GraphEngine {
@@ -44,6 +50,24 @@ impl GraphEngine {
             output_module: None,
             output_port: None,
             has_stereo_output: false,
+            module_loader: ModuleLoader::new(),
+            imported_modules: HashMap::new(),
+        }
+    }
+
+    /// Create a new engine with module loading relative to a patch file
+    #[must_use]
+    pub fn from_patch_file<P: AsRef<std::path::Path>>(patch_file: P) -> Self {
+        Self {
+            graph: Arc::new(Mutex::new(GraphExecutor::new())),
+            stream: None,
+            is_running: false,
+            sample_rate: 44100.0,
+            output_module: None,
+            output_port: None,
+            has_stereo_output: false,
+            module_loader: ModuleLoader::from_patch_file(patch_file),
+            imported_modules: HashMap::new(),
         }
     }
 
@@ -87,8 +111,36 @@ impl GraphEngine {
     fn handle_parsed_command(&mut self, command: Command) -> Result<String> {
         match command {
             Command::CreateModule { name, module_type, params } => {
-                self.create_module(name.clone(), module_type, &params)?;
-                Ok(format!("Created module: {name}"))
+                match module_type {
+                    ModuleTypeRef::BuiltIn(builtin_type) => {
+                        self.create_module(name.clone(), builtin_type, &params)?;
+                        Ok(format!("Created module: {name}"))
+                    }
+                    ModuleTypeRef::Imported(imported_name) => {
+                        // Check if the imported module is available
+                        if let Some(_patchbay) = self.imported_modules.get(&imported_name) {
+                            // Load the full module and instantiate it
+                            let loaded_module = self.module_loader.load_module(&imported_name)?;
+                            self.instantiate_imported_module(&name, &loaded_module)?;
+
+                            let module_count = loaded_module
+                                .commands
+                                .iter()
+                                .filter(|cmd| matches!(cmd, Command::CreateModule { .. }))
+                                .count();
+
+                            Ok(format!(
+                                "Created imported module '{name}' with {module_count} internal modules"
+                            ))
+                        } else {
+                            Err(anyhow!(
+                                "Imported module '{}' not found. Available modules: {:?}",
+                                imported_name,
+                                self.imported_modules.keys().collect::<Vec<_>>()
+                            ))
+                        }
+                    }
+                }
             }
             Command::Connect { from, to } => {
                 // Handle connections
@@ -122,6 +174,35 @@ impl GraphEngine {
                 self.graph.lock().unwrap().set_module_param(&module, &param, value)?;
                 Ok(format!("Set {module}.{param} = {value}"))
             }
+            Command::Import { import } => {
+                // Load the module (textual inclusion approach)
+                let loaded_module = self.module_loader.load_module(&import.module_path)?;
+
+                // Store the module for instantiation (no patchbay validation needed)
+                let key = import.alias.as_ref().unwrap_or(&import.module_path).clone();
+
+                // Create a dummy patchbay entry so the module can be instantiated
+                let dummy_patchbay = PatchbayDef { ports: Vec::new() };
+                self.imported_modules.insert(key.clone(), dummy_patchbay);
+
+                let module_count = loaded_module
+                    .commands
+                    .iter()
+                    .filter(|cmd| matches!(cmd, Command::CreateModule { .. }))
+                    .count();
+
+                Ok(format!(
+                    "Imported module '{}' as '{}' with {} internal modules",
+                    import.module_path, key, module_count
+                ))
+            }
+            Command::DefinePatchbay { patchbay } => {
+                // Store patchbay definition for the current module/patch
+                // This is used when defining a module inline rather than importing
+                let key = "_current_module".to_string();
+                self.imported_modules.insert(key, patchbay.clone());
+                Ok(format!("Defined patchbay with {} ports", patchbay.ports.len()))
+            }
         }
     }
 
@@ -142,7 +223,14 @@ impl GraphEngine {
         Err(anyhow!("Unrecognized syntax: {}", line))
     }
 
-    fn parse_connection(&self, dest: &str, source_expr: &str) -> Result<String> {
+    /// Parse a connection between modules
+    ///
+    /// # Errors
+    /// Returns an error if the destination format is invalid or connection parsing fails
+    ///
+    /// # Panics
+    /// Panics if the graph mutex is poisoned
+    pub fn parse_connection(&self, dest: &str, source_expr: &str) -> Result<String> {
         // Parse destination
         let dest_parts: Vec<&str> = dest.split('.').collect();
         if dest_parts.len() != 2 {
@@ -307,6 +395,142 @@ impl GraphEngine {
         Ok(())
     }
 
+    /// Create a module from a type reference (either built-in or imported)
+    /// This is used by the module instantiator
+    ///
+    /// # Errors
+    /// Returns an error if module creation fails or if nested imported modules are encountered
+    pub fn create_module_from_type_ref(
+        &mut self,
+        name: String,
+        module_type_ref: ModuleTypeRef,
+        params: &[f32],
+    ) -> Result<()> {
+        match module_type_ref {
+            ModuleTypeRef::BuiltIn(builtin_type) => self.create_module(name, builtin_type, params),
+            ModuleTypeRef::Imported(imported_name) => {
+                // This should not happen during instantiation - imported modules
+                // should be resolved before reaching this point
+                Err(anyhow!("Cannot create nested imported module: {}", imported_name))
+            }
+        }
+    }
+
+    /// Set a module parameter (public wrapper for instantiator)
+    ///
+    /// # Errors
+    /// Returns an error if the module or parameter is not found
+    ///
+    /// # Panics
+    /// Panics if the graph mutex is poisoned
+    pub fn set_module_param(&self, module_name: &str, param_name: &str, value: f32) -> Result<()> {
+        self.graph.lock().unwrap().set_module_param(module_name, param_name, value)
+    }
+
+    /// Instantiate an imported module by creating its internal modules and connections
+    fn instantiate_imported_module(
+        &mut self,
+        instance_name: &str,
+        loaded_module: &LoadedModule,
+    ) -> Result<()> {
+        // Note: With textual inclusion approach, patchbay is just another module
+        // No special patchbay processing needed
+
+        // Process all internal commands (skip the patchbay definition)
+        for command in &loaded_module.commands {
+            match command {
+                Command::DefinePatchbay { .. } => {
+                    // Skip patchbay definition - already processed during import
+                }
+                Command::CreateModule { name, module_type, params } => {
+                    // Create internal module with prefixed name
+                    let internal_name = format!("{instance_name}_{name}");
+                    self.create_module_from_type_ref(internal_name, module_type.clone(), params)?;
+                }
+                Command::Connect { from, to } => {
+                    // Process internal connections with name prefixing
+                    let prefixed_from = Self::prefix_module_reference(instance_name, from);
+                    let prefixed_to = Self::prefix_module_reference(instance_name, to);
+
+                    self.parse_connection(&prefixed_to, &prefixed_from)?;
+                }
+                Command::SetParam { module, param, value } => {
+                    // Set parameters on internal modules
+                    let internal_module = format!("{instance_name}_{module}");
+                    self.set_module_param(&internal_module, param, *value)?;
+                }
+                Command::Import { .. } => {
+                    // Nested imports - would need recursive handling
+                    return Err(anyhow!(
+                        "Nested imports not yet supported in module '{}'",
+                        loaded_module.module_path
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Prefix module references for instantiation
+    fn prefix_module_reference(instance_name: &str, module_ref: &str) -> String {
+        // Handle arithmetic expressions
+        if module_ref.contains('*') || module_ref.contains('+') || module_ref.contains('-') {
+            return Self::prefix_arithmetic_expression(instance_name, module_ref);
+        }
+
+        if module_ref.contains('.') {
+            // module.port format
+            let parts: Vec<&str> = module_ref.split('.').collect();
+            if parts.len() == 2 {
+                format!("{instance_name}_{}.{}", parts[0], parts[1])
+            } else {
+                format!("{instance_name}_{module_ref}")
+            }
+        } else {
+            // Simple module reference (could be patchbay port)
+            format!("{instance_name}_{module_ref}")
+        }
+    }
+
+    /// Prefix arithmetic expressions by identifying and prefixing module references
+    fn prefix_arithmetic_expression(instance_name: &str, expression: &str) -> String {
+        // Simple approach: split on operators and prefix each part that looks like a module reference
+        // Split on operators but preserve them
+        let parts: Vec<&str> = expression.split_inclusive(&['*', '+', '-', ' ']).collect();
+        let mut prefixed_parts = Vec::new();
+
+        for part in parts {
+            let trimmed = part.trim_end_matches(['*', '+', '-', ' ']);
+            let suffix = &part[trimmed.len()..];
+
+            // Check if this part is a number
+            if trimmed.parse::<f32>().is_ok() {
+                // It's a number, keep as-is
+                prefixed_parts.push(part.to_string());
+            } else if trimmed.contains('.') {
+                // It's a module.port reference
+                let module_parts: Vec<&str> = trimmed.split('.').collect();
+                if module_parts.len() == 2 {
+                    prefixed_parts.push(format!(
+                        "{instance_name}_{}.{}{suffix}",
+                        module_parts[0], module_parts[1]
+                    ));
+                } else {
+                    prefixed_parts.push(format!("{instance_name}_{trimmed}{suffix}"));
+                }
+            } else if !trimmed.is_empty() {
+                // It's a simple reference (module or patchbay port)
+                prefixed_parts.push(format!("{instance_name}_{trimmed}{suffix}"));
+            } else {
+                // Just whitespace or operators
+                prefixed_parts.push(part.to_string());
+            }
+        }
+
+        prefixed_parts.join("")
+    }
+
     /// Start audio processing
     /// Start audio processing
     ///
@@ -401,6 +625,8 @@ impl GraphEngine {
         self.output_module = None;
         self.output_port = None;
         self.has_stereo_output = false;
+        self.module_loader.clear_cache();
+        self.imported_modules.clear();
     }
 
     /// List all modules

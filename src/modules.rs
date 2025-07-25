@@ -62,6 +62,7 @@ pub fn parse_module_type(s: &str) -> Result<ModuleType> {
         "mix" | "mixer" | "mono_mixer" => Ok(ModuleType::Mixer),
         "stereomix" | "stereo_mixer" | "stereo_mix" => Ok(ModuleType::StereoMixer),
         "out" | "output" => Ok(ModuleType::Output),
+        "stereo_output" | "stereo" => Ok(ModuleType::StereoOutput),
         "lfo" => Ok(ModuleType::Lfo),
         "gate" | "manual" => Ok(ModuleType::ManualGate),
         "noise" | "noise_gen" => Ok(ModuleType::Noise),

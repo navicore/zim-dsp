@@ -1,6 +1,10 @@
 # Rust build artifacts
 /target
 /Cargo.lock
+/examples/test*
+/examples/debug*
+/test*
+/debug*
 
 # Editor files
 *.swp
