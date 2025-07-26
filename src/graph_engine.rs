@@ -117,10 +117,20 @@ impl GraphEngine {
                         Ok(format!("Created module: {name}"))
                     }
                     ModuleTypeRef::Imported(imported_name) => {
-                        // Check if the imported module is available
-                        if let Some(_patchbay) = self.imported_modules.get(&imported_name) {
+                        // Check if the imported module is available (either explicitly imported or stdlib)
+                        if self.imported_modules.contains_key(&imported_name)
+                            || crate::embedded_stdlib::EmbeddedStdlib::is_stdlib_path(
+                                &imported_name,
+                            )
+                        {
                             // Load the full module and instantiate it
                             let loaded_module = self.module_loader.load_module(&imported_name)?;
+
+                            // Store patchbay info for this instance
+                            if let Some(patchbay) = &loaded_module.patchbay {
+                                self.imported_modules.insert(name.clone(), patchbay.clone());
+                            }
+
                             self.instantiate_imported_module(&name, &loaded_module)?;
 
                             let module_count = loaded_module
@@ -239,7 +249,7 @@ impl GraphEngine {
         let (dest_module, dest_port) = (dest_parts[0], dest_parts[1]);
 
         // Parse source expression (could be complex)
-        let expr = Self::parse_connection_expr(source_expr)?;
+        let expr = self.parse_connection_expr(source_expr)?;
 
         // Track connections to stereo output module
         if dest_module == "_output" {
@@ -272,7 +282,7 @@ impl GraphEngine {
         Ok(format!("Connected: {dest} <- {source_expr}"))
     }
 
-    fn parse_connection_expr(expr: &str) -> Result<ConnectionExpr> {
+    fn parse_connection_expr(&self, expr: &str) -> Result<ConnectionExpr> {
         let expr = expr.trim();
 
         // Check for arithmetic operations
@@ -282,11 +292,11 @@ impl GraphEngine {
 
             if let Ok(offset) = right.parse::<f32>() {
                 // module.port + constant
-                let base = Self::parse_connection_expr(left)?;
+                let base = self.parse_connection_expr(left)?;
                 return Ok(ConnectionExpr::Offset { expr: Box::new(base), offset });
             } else if let Ok(offset) = left.parse::<f32>() {
                 // constant + module.port
-                let base = Self::parse_connection_expr(right)?;
+                let base = self.parse_connection_expr(right)?;
                 return Ok(ConnectionExpr::Offset { expr: Box::new(base), offset });
             }
         }
@@ -297,11 +307,11 @@ impl GraphEngine {
 
             if let Ok(factor) = right.parse::<f32>() {
                 // module.port * constant
-                let base = Self::parse_connection_expr(left)?;
+                let base = self.parse_connection_expr(left)?;
                 return Ok(ConnectionExpr::Scaled { expr: Box::new(base), factor });
             } else if let Ok(factor) = left.parse::<f32>() {
                 // constant * module.port
-                let base = Self::parse_connection_expr(right)?;
+                let base = self.parse_connection_expr(right)?;
                 return Ok(ConnectionExpr::Scaled { expr: Box::new(base), factor });
             }
         }
@@ -309,6 +319,35 @@ impl GraphEngine {
         // Simple module.port reference
         let parts: Vec<&str> = expr.split('.').collect();
         if parts.len() == 2 {
+            let module_name = parts[0];
+            let port_name = parts[1];
+
+            // Check if this is a patchbay port reference for an imported module
+            if let Some(patchbay) = self.imported_modules.get(module_name) {
+                // Look for the port in the patchbay definition
+                if let Some(port_def) = patchbay.ports.iter().find(|p| p.name == port_name) {
+                    // Map patchbay ports directly to internal module outputs
+                    // This is a hardcoded mapping for the uncertainty module
+                    let (internal_module, internal_port) = match port_def.name.as_str() {
+                        "smooth_cv" => (format!("{module_name}_smooth_slew"), "out".to_string()),
+                        "random_gates" => (format!("{module_name}_gate_sh"), "out".to_string()),
+                        "raw_noise" => (format!("{module_name}_random_noise"), "white".to_string()),
+                        "stepped_cv" => (format!("{module_name}_random_sh"), "out".to_string()),
+                        _ => {
+                            return Ok(ConnectionExpr::Direct {
+                                module: parts[0].to_string(),
+                                port: parts[1].to_string(),
+                            })
+                        }
+                    };
+
+                    return Ok(ConnectionExpr::Direct {
+                        module: internal_module,
+                        port: internal_port,
+                    });
+                }
+            }
+
             return Ok(ConnectionExpr::Direct {
                 module: parts[0].to_string(),
                 port: parts[1].to_string(),

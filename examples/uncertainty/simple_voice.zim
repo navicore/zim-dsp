@@ -1,0 +1,23 @@
+# Generative Voice with Uncertainty Module
+#
+# This demonstrates the stdlib:uncertainty module for generative synthesis.
+# The uncertainty module provides random CV and gates.
+
+unc: stdlib:uncertainty
+
+# Voice synthesis chain
+voice: osc saw 220
+env: envelope 0.01 0.3
+vca: vca
+
+# Use uncertainty module outputs for modulation
+voice.freq <- unc.smooth_cv * 100 + 220
+env.gate <- unc.random_gates
+
+# Signal path
+vca.audio <- voice.saw
+vca.cv <- env.out
+
+out.left <- vca.out
+out.right <- vca.out
+start
