@@ -15,6 +15,7 @@ mod modules;
 mod observability;
 mod parser;
 mod test_framework;
+mod user_modules;
 
 use graph_engine::GraphEngine;
 
@@ -281,6 +282,17 @@ fn run_repl() -> Result<()> {
                             }
                         }
                     }
+                    "list usermodules" => {
+                        let user_modules = engine.list_user_modules();
+                        if user_modules.is_empty() {
+                            println!("No user modules found");
+                        } else {
+                            println!("User modules:");
+                            for module in user_modules {
+                                println!("  - {module}");
+                            }
+                        }
+                    }
                     "validate" => {
                         let errors = engine.validate_connections();
                         if errors.is_empty() {
@@ -323,8 +335,23 @@ fn run_repl() -> Result<()> {
                                 for output in &info.outputs {
                                     println!("    - {}: {}", output.name, output.description);
                                 }
+                            } else if let Some(info) = engine.inspect_user_module(module_name) {
+                                println!("User Module: {}", info.name);
+                                println!("  Inputs:");
+                                for input in &info.inputs {
+                                    println!(
+                                        "    - {} (default: {}): {}",
+                                        input.name, input.default_value, input.description
+                                    );
+                                }
+                                println!("  Outputs:");
+                                for output in &info.outputs {
+                                    println!("    - {}: {}", output.name, output.description);
+                                }
                             } else {
-                                eprintln!("Module or module type '{module_name}' not found");
+                                eprintln!(
+                                    "Module, module type, or user module '{module_name}' not found"
+                                );
                             }
                         } else {
                             // Try to parse as patch command
@@ -391,7 +418,8 @@ fn print_repl_help() {
     release/r - Turn off manual gates
     clear     - Clear current patch
     list      - List all modules
-    inspect <name> - Inspect module ports (e.g., 'inspect osc1' or 'inspect osc')
+    list usermodules - List all user modules
+    inspect <name> - Inspect module ports (e.g., 'inspect osc1' or 'inspect simple_gain')
     validate  - Validate all connections
     quit      - Exit REPL
     

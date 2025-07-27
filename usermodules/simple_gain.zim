@@ -1,0 +1,12 @@
+# Simple gain user module
+module simple_gain {
+    inputs: audio
+    outputs: out
+    
+    # Internal modules
+    vca: vca 0.5
+    
+    # Internal connections
+    vca.audio <- $audio
+    $out <- vca.out
+}

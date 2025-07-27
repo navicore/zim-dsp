@@ -9,6 +9,7 @@ use crate::graph_modules::{
 use crate::modules::ModuleType;
 use crate::observability::SignalObserver;
 use crate::parser::{parse_line, Command};
+use crate::user_modules::UserModuleRegistry;
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
@@ -25,6 +26,8 @@ pub struct GraphEngine {
     output_port: Option<String>,
     // Track if we have a stereo output module
     has_stereo_output: bool,
+    // User module registry
+    user_modules: UserModuleRegistry,
 }
 
 impl Default for GraphEngine {
@@ -36,6 +39,13 @@ impl Default for GraphEngine {
 impl GraphEngine {
     #[must_use]
     pub fn new() -> Self {
+        let mut user_modules = UserModuleRegistry::new();
+
+        // Load user modules from usermodules directory
+        if let Err(e) = user_modules.scan_directory("usermodules") {
+            eprintln!("Warning: Failed to load user modules: {e}");
+        }
+
         Self {
             graph: Arc::new(Mutex::new(GraphExecutor::new())),
             stream: None,
@@ -44,6 +54,7 @@ impl GraphEngine {
             output_module: None,
             output_port: None,
             has_stereo_output: false,
+            user_modules,
         }
     }
 
@@ -480,6 +491,45 @@ impl GraphEngine {
             inputs: temp_module.inputs(),
             outputs: temp_module.outputs(),
         })
+    }
+
+    /// Inspect a user module by name
+    #[must_use]
+    pub fn inspect_user_module(&self, name: &str) -> Option<ModuleInfo> {
+        self.user_modules.get(name).map(|template| {
+            // Convert user module inputs/outputs to PortDescriptors
+            let inputs = template
+                .inputs
+                .iter()
+                .map(|name| crate::graph::PortDescriptor {
+                    name: name.clone(),
+                    default_value: 0.0,
+                    description: format!("User module input: {name}"),
+                })
+                .collect();
+
+            let outputs = template
+                .outputs
+                .iter()
+                .map(|name| crate::graph::PortDescriptor {
+                    name: name.clone(),
+                    default_value: 0.0,
+                    description: format!("User module output: {name}"),
+                })
+                .collect();
+
+            ModuleInfo {
+                name: format!("user:{}", template.name),
+                inputs,
+                outputs,
+            }
+        })
+    }
+
+    /// List all available user modules
+    #[must_use]
+    pub fn list_user_modules(&self) -> Vec<String> {
+        self.user_modules.list_modules().iter().map(|s| (*s).clone()).collect()
     }
 
     /// Validate all connections
