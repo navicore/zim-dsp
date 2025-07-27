@@ -532,6 +532,52 @@ impl GraphEngine {
         self.user_modules.list_modules().iter().map(|s| (*s).clone()).collect()
     }
 
+    /// Expand a patch with user modules for debugging (dry-run)
+    #[must_use]
+    pub fn expand_patch(&self, patch_content: &str) -> Vec<String> {
+        let mut expanded_lines = Vec::new();
+
+        for line in patch_content.lines() {
+            let trimmed = line.trim();
+
+            // Skip empty lines and comments
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+
+            // Check if this looks like a module creation line
+            if let Some(colon_pos) = trimmed.find(':') {
+                let name = trimmed[..colon_pos].trim();
+                let rest = trimmed[colon_pos + 1..].trim();
+
+                // Extract the module type (first word after colon)
+                let parts: Vec<&str> = rest.split_whitespace().collect();
+                if let Some(module_type_str) = parts.first() {
+                    // Check if this is a user module type first
+                    if let Some(template) = self.user_modules.get(module_type_str) {
+                        // This is a user module - expand it
+                        expanded_lines.push(format!("# Expanding user module: {name}"));
+                        let expanded_commands = template.expand(name);
+                        for cmd in expanded_commands {
+                            expanded_lines.push(cmd.to_string());
+                        }
+                    } else {
+                        // Regular module or unparseable - keep as-is
+                        expanded_lines.push(trimmed.to_string());
+                    }
+                } else {
+                    // Malformed module creation line
+                    expanded_lines.push(trimmed.to_string());
+                }
+            } else {
+                // Not a module creation - keep as-is
+                expanded_lines.push(trimmed.to_string());
+            }
+        }
+
+        expanded_lines
+    }
+
     /// Validate all connections
     ///
     /// # Panics

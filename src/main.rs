@@ -353,6 +353,13 @@ fn run_repl() -> Result<()> {
                                     "Module, module type, or user module '{module_name}' not found"
                                 );
                             }
+                        } else if let Some(patch_content) = input.strip_prefix("expand ") {
+                            // Expand command for debugging user modules
+                            let expanded_lines = engine.expand_patch(patch_content);
+                            println!("Expanded patch:");
+                            for line in expanded_lines {
+                                println!("  {line}");
+                            }
                         } else {
                             // Try to parse as patch command
                             match engine.process_line(input) {
@@ -420,6 +427,7 @@ fn print_repl_help() {
     list      - List all modules
     list usermodules - List all user modules
     inspect <name> - Inspect module ports (e.g., 'inspect osc1' or 'inspect simple_gain')
+    expand <patch> - Expand user modules in patch for debugging
     validate  - Validate all connections
     quit      - Exit REPL
     

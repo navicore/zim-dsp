@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use crate::parser::Command;
+
 /// Represents a user-defined module template
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // template_content will be used in next phase
@@ -32,6 +34,110 @@ impl UserModuleTemplate {
         template_content: String,
     ) -> Self {
         Self { name, inputs, outputs, template_content }
+    }
+
+    /// Expand this template into a flat list of commands for a given instance
+    #[must_use]
+    pub fn expand(&self, instance_name: &str) -> Vec<Command> {
+        let mut expanded_commands = Vec::new();
+
+        // Parse each line of the template content
+        for line in self.template_content.lines() {
+            let trimmed = line.trim();
+
+            // Skip empty lines and comments
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+
+            // Skip the module declaration line (already processed)
+            if trimmed.starts_with("module ")
+                || trimmed.starts_with("inputs:")
+                || trimmed.starts_with("outputs:")
+            {
+                continue;
+            }
+
+            // Process template variables and prefix module names
+            let expanded_line = self.expand_line(trimmed, instance_name);
+
+            // Try to parse the expanded line as a command
+            if let Ok(command) = crate::parser::parse_line(&expanded_line) {
+                expanded_commands.push(command);
+            }
+        }
+
+        expanded_commands
+    }
+
+    /// Expand a single line of template content
+    fn expand_line(&self, line: &str, instance_name: &str) -> String {
+        let mut expanded = line.to_string();
+
+        // Handle template variable substitution and module prefixing
+        if line.contains(':') {
+            // This is a module creation line - prefix the module name
+            if let Some(colon_pos) = line.find(':') {
+                let module_name = line[..colon_pos].trim();
+                let rest = &line[colon_pos..];
+                expanded = format!("{instance_name}_{module_name}{rest}");
+            }
+        } else if line.contains("<-") {
+            // This is a connection line - handle template variables and module prefixing
+            expanded = self.expand_connection_line(line, instance_name);
+        }
+
+        expanded
+    }
+
+    /// Expand a connection line with template variables and module prefixing
+    fn expand_connection_line(&self, line: &str, instance_name: &str) -> String {
+        let mut expanded = line.to_string();
+
+        // Replace template variables ($input/$output) with actual connection endpoints
+        // For now, we'll create placeholder expansions - the actual connections will be
+        // handled when the user module is instantiated in a host patch
+
+        // Replace $input variables with external connection placeholders
+        for input in &self.inputs {
+            let template_var = format!("${input}");
+            let placeholder = format!("EXTERNAL_INPUT_{input}");
+            expanded = expanded.replace(&template_var, &placeholder);
+        }
+
+        // Replace $output variables with external connection placeholders
+        for output in &self.outputs {
+            let template_var = format!("${output}");
+            let placeholder = format!("EXTERNAL_OUTPUT_{output}");
+            expanded = expanded.replace(&template_var, &placeholder);
+        }
+
+        // Prefix internal module names
+        expanded = Self::prefix_module_names(&expanded, instance_name);
+
+        expanded
+    }
+
+    /// Prefix module names in a connection line
+    fn prefix_module_names(line: &str, instance_name: &str) -> String {
+        let mut result = line.to_string();
+
+        // Find module references (words followed by '.' but not starting with EXTERNAL_)
+        // This is a simplified approach - we'll improve it later
+        let words: Vec<&str> = line.split_whitespace().collect();
+        for word in words {
+            if word.contains('.') && !word.starts_with("EXTERNAL_") {
+                let parts: Vec<&str> = word.split('.').collect();
+                if parts.len() == 2 {
+                    let module_name = parts[0];
+                    let port_name = parts[1];
+                    let prefixed = format!("{instance_name}_{module_name}.{port_name}");
+                    result = result.replace(word, &prefixed);
+                }
+            }
+        }
+
+        result
     }
 }
 
@@ -330,5 +436,55 @@ module complex_filter {
         assert_eq!(name, "complex_filter");
         assert_eq!(inputs, vec!["audio", "cutoff_cv", "gate"]);
         assert_eq!(outputs, vec!["lowpass", "highpass", "bandpass"]);
+    }
+
+    #[test]
+    fn test_template_expansion() {
+        let template = UserModuleTemplate::new(
+            "simple_gain".to_string(),
+            vec!["audio".to_string()],
+            vec!["out".to_string()],
+            r"
+# Internal modules
+vca: vca 0.5
+
+# Internal connections  
+vca.audio <- $audio
+$out <- vca.out
+"
+            .to_string(),
+        );
+
+        let commands = template.expand("ef");
+        assert_eq!(commands.len(), 3); // vca creation + two connections
+
+        // Check that module creation was prefixed
+        match &commands[0] {
+            Command::CreateModule { name, .. } => {
+                assert_eq!(name, "ef_vca");
+            }
+            _ => panic!("Expected CreateModule command"),
+        }
+    }
+
+    #[test]
+    fn test_line_expansion() {
+        let template = UserModuleTemplate::new(
+            "test".to_string(),
+            vec!["audio".to_string()],
+            vec!["out".to_string()],
+            String::new(),
+        );
+
+        // Test module creation line
+        let result = template.expand_line("vca: vca 0.5", "ef");
+        assert_eq!(result, "ef_vca: vca 0.5");
+
+        // Test connection line with template variables
+        let result = template.expand_line("vca.audio <- $audio", "ef");
+        assert_eq!(result, "ef_vca.audio <- EXTERNAL_INPUT_audio");
+
+        let result = template.expand_line("$out <- vca.out", "ef");
+        assert_eq!(result, "EXTERNAL_OUTPUT_out <- ef_vca.out");
     }
 }
