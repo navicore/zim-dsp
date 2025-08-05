@@ -1,0 +1,5 @@
+# Isolated patch that should fall back to home directory
+vco: osc triangle 550
+gain1: home_gain
+vco.triangle -> gain1.audio
+out <- gain1.out

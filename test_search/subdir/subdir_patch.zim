@@ -1,0 +1,5 @@
+# Subdirectory patch that should find test_gain in ../usermodules/
+vco: osc saw 220
+gain1: test_gain
+vco.saw -> gain1.audio
+out <- gain1.out

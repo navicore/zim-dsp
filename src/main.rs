@@ -43,7 +43,7 @@ fn main() -> Result<()> {
 fn play_patch(patch_file: &str) -> Result<()> {
     println!("Loading patch: {patch_file}");
 
-    let mut engine = GraphEngine::new();
+    let mut engine = GraphEngine::new_with_patch_context(Some(patch_file));
     let patch_content = std::fs::read_to_string(patch_file)?;
 
     // Check if the patch contains a "start" command
