@@ -39,12 +39,15 @@ impl Default for GraphEngine {
 impl GraphEngine {
     #[must_use]
     pub fn new() -> Self {
+        Self::new_with_patch_context(None)
+    }
+
+    #[must_use]
+    pub fn new_with_patch_context(patch_file: Option<&str>) -> Self {
         let mut user_modules = UserModuleRegistry::new();
 
-        // Load user modules from usermodules directory
-        if let Err(e) = user_modules.scan_directory("usermodules") {
-            eprintln!("Warning: Failed to load user modules: {e}");
-        }
+        // Load user modules using search hierarchy
+        Self::load_user_modules_with_search(&mut user_modules, patch_file);
 
         Self {
             graph: Arc::new(Mutex::new(GraphExecutor::new())),
@@ -55,6 +58,50 @@ impl GraphEngine {
             output_port: None,
             has_stereo_output: false,
             user_modules,
+        }
+    }
+
+    /// Load user modules using a search hierarchy of directories
+    fn load_user_modules_with_search(
+        user_modules: &mut crate::user_modules::UserModuleRegistry,
+        patch_file: Option<&str>,
+    ) {
+        let mut search_paths = Vec::new();
+
+        // 1. Current directory
+        search_paths.push("usermodules".to_string());
+
+        // 2. Same directory as patch file (if provided)
+        if let Some(patch_path) = patch_file {
+            if let Some(patch_dir) = std::path::Path::new(patch_path).parent() {
+                let patch_usermodules = patch_dir.join("usermodules");
+                search_paths.push(patch_usermodules.to_string_lossy().to_string());
+            }
+        }
+
+        // 3. User home directory
+        if let Some(home_dir) = dirs::home_dir() {
+            let home_usermodules = home_dir.join(".zim-dsp").join("usermodules");
+            search_paths.push(home_usermodules.to_string_lossy().to_string());
+        }
+
+        // Try each search path in order
+        let mut total_loaded = 0;
+        let mut loaded_from = Vec::new();
+
+        for path in &search_paths {
+            if let Ok(count) = user_modules.scan_directory(path) {
+                if count > 0 {
+                    total_loaded += count;
+                    loaded_from.push(format!("{path} ({count} modules)"));
+                }
+            }
+        }
+
+        if total_loaded > 0 {
+            println!("Loaded {total_loaded} user modules from: {}", loaded_from.join(", "));
+        } else if !search_paths.is_empty() {
+            println!("No user modules found. Searched: {}", search_paths.join(", "));
         }
     }
 
