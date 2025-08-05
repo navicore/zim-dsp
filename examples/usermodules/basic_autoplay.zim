@@ -1,0 +1,17 @@
+# Basic user module example with auto-play
+# Uses the simple_gain user module from usermodules/simple_gain.zim
+
+# Create source oscillator
+vco: osc sine 440
+
+# Create user module instance
+gain1: simple_gain
+
+# Connect oscillator to user module
+vco.sine -> gain1.audio
+
+# Connect user module to output
+out <- gain1.out
+
+# Auto-start audio
+start

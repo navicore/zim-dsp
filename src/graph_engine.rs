@@ -9,6 +9,7 @@ use crate::graph_modules::{
 use crate::modules::ModuleType;
 use crate::observability::SignalObserver;
 use crate::parser::{parse_line, Command};
+use crate::user_modules::UserModuleRegistry;
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
@@ -25,6 +26,8 @@ pub struct GraphEngine {
     output_port: Option<String>,
     // Track if we have a stereo output module
     has_stereo_output: bool,
+    // User module registry
+    user_modules: UserModuleRegistry,
 }
 
 impl Default for GraphEngine {
@@ -36,6 +39,13 @@ impl Default for GraphEngine {
 impl GraphEngine {
     #[must_use]
     pub fn new() -> Self {
+        let mut user_modules = UserModuleRegistry::new();
+
+        // Load user modules from usermodules directory
+        if let Err(e) = user_modules.scan_directory("usermodules") {
+            eprintln!("Warning: Failed to load user modules: {e}");
+        }
+
         Self {
             graph: Arc::new(Mutex::new(GraphExecutor::new())),
             stream: None,
@@ -44,6 +54,7 @@ impl GraphEngine {
             output_module: None,
             output_port: None,
             has_stereo_output: false,
+            user_modules,
         }
     }
 
@@ -55,7 +66,11 @@ impl GraphEngine {
     pub fn load_patch(&mut self, patch_content: &str) -> Result<()> {
         self.clear_patch();
 
-        for line in patch_content.lines() {
+        // Phase 1: Preprocess to expand user modules
+        let expanded_patch = self.preprocess_patch(patch_content);
+
+        // Phase 2: Process expanded patch normally
+        for line in expanded_patch.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
                 continue;
@@ -74,6 +89,11 @@ impl GraphEngine {
     /// # Errors
     /// Returns an error if the line cannot be parsed or processed
     pub fn process_line(&mut self, line: &str) -> Result<String> {
+        // Check for user module creation before trying built-in parser
+        if let Ok(result) = self.try_process_user_module(line) {
+            return Ok(result);
+        }
+
         // First try parsing with the existing parser
         match parse_line(line) {
             Ok(command) => self.handle_parsed_command(command),
@@ -128,9 +148,20 @@ impl GraphEngine {
     fn handle_extended_syntax(&self, line: &str) -> Result<String> {
         // Handle new syntax patterns
 
+        // Pattern: source.port -> module.port
+        if line.contains(" -> ") {
+            let parts: Vec<&str> = line.split(" -> ").collect();
+            if parts.len() == 2 {
+                let source = parts[0].trim();
+                let dest = parts[1].trim();
+
+                return self.parse_connection(dest, source);
+            }
+        }
+
         // Pattern: module.port <- source.port
-        if line.contains("<-") {
-            let parts: Vec<&str> = line.split("<-").collect();
+        if line.contains(" <- ") {
+            let parts: Vec<&str> = line.split(" <- ").collect();
             if parts.len() == 2 {
                 let dest = parts[0].trim();
                 let source = parts[1].trim();
@@ -140,6 +171,75 @@ impl GraphEngine {
         }
 
         Err(anyhow!("Unrecognized syntax: {}", line))
+    }
+
+    /// Try to process a line as a user module creation
+    ///
+    /// # Errors
+    /// Returns an error if the line is not a user module or processing fails
+    fn try_process_user_module(&mut self, line: &str) -> Result<String> {
+        let trimmed = line.trim();
+
+        // Check if this looks like a module creation line
+        if let Some(colon_pos) = trimmed.find(':') {
+            let name = trimmed[..colon_pos].trim();
+            let rest = trimmed[colon_pos + 1..].trim();
+
+            // Extract the module type (first word after colon)
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            if let Some(module_type_str) = parts.first() {
+                // Check if this is a user module type
+                if let Some(template) = self.user_modules.get(module_type_str) {
+                    // Clone the template to avoid borrowing issues
+                    let template = template.clone();
+                    // This is a user module - expand and process it
+                    return self.process_user_module_expansion(name, &template);
+                }
+            }
+        }
+
+        // Not a user module
+        Err(anyhow!("Not a user module"))
+    }
+
+    /// Process a user module expansion in REPL context
+    ///
+    /// # Errors
+    /// Returns an error if template expansion or command processing fails
+    fn process_user_module_expansion(
+        &mut self,
+        instance_name: &str,
+        template: &crate::user_modules::UserModuleTemplate,
+    ) -> Result<String> {
+        // Expand the user module template
+        let expanded_commands = template.expand(instance_name);
+
+        let mut results = Vec::new();
+        results.push(format!("# Expanding user module: {instance_name}"));
+
+        // Process each expanded command
+        for command in expanded_commands {
+            let command_str = command.to_string();
+
+            // Skip EXTERNAL_* placeholder connections for now
+            if command_str.contains("EXTERNAL_INPUT_") || command_str.contains("EXTERNAL_OUTPUT_") {
+                continue;
+            }
+
+            // Process the expanded command normally
+            match self.handle_parsed_command(command) {
+                Ok(result) => results.push(result),
+                Err(e) => {
+                    return Err(anyhow!(
+                        "Error processing expanded command '{}': {}",
+                        command_str,
+                        e
+                    ))
+                }
+            }
+        }
+
+        Ok(results.join("\n"))
     }
 
     fn parse_connection(&self, dest: &str, source_expr: &str) -> Result<String> {
@@ -480,6 +580,248 @@ impl GraphEngine {
             inputs: temp_module.inputs(),
             outputs: temp_module.outputs(),
         })
+    }
+
+    /// Inspect a user module by name
+    #[must_use]
+    pub fn inspect_user_module(&self, name: &str) -> Option<ModuleInfo> {
+        self.user_modules.get(name).map(|template| {
+            // Convert user module inputs/outputs to PortDescriptors
+            let inputs = template
+                .inputs
+                .iter()
+                .map(|name| crate::graph::PortDescriptor {
+                    name: name.clone(),
+                    default_value: 0.0,
+                    description: format!("User module input: {name}"),
+                })
+                .collect();
+
+            let outputs = template
+                .outputs
+                .iter()
+                .map(|name| crate::graph::PortDescriptor {
+                    name: name.clone(),
+                    default_value: 0.0,
+                    description: format!("User module output: {name}"),
+                })
+                .collect();
+
+            ModuleInfo {
+                name: format!("user:{}", template.name),
+                inputs,
+                outputs,
+            }
+        })
+    }
+
+    /// List all available user modules
+    #[must_use]
+    pub fn list_user_modules(&self) -> Vec<String> {
+        self.user_modules.list_modules().iter().map(|s| (*s).clone()).collect()
+    }
+
+    /// Expand a patch with user modules for debugging (dry-run)
+    #[must_use]
+    pub fn expand_patch(&self, patch_content: &str) -> Vec<String> {
+        let mut expanded_lines = Vec::new();
+
+        for line in patch_content.lines() {
+            let trimmed = line.trim();
+
+            // Skip empty lines and comments
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+
+            // Check if this looks like a module creation line
+            if let Some(colon_pos) = trimmed.find(':') {
+                let name = trimmed[..colon_pos].trim();
+                let rest = trimmed[colon_pos + 1..].trim();
+
+                // Extract the module type (first word after colon)
+                let parts: Vec<&str> = rest.split_whitespace().collect();
+                if let Some(module_type_str) = parts.first() {
+                    // Check if this is a user module type first
+                    if let Some(template) = self.user_modules.get(module_type_str) {
+                        // This is a user module - expand it
+                        expanded_lines.push(format!("# Expanding user module: {name}"));
+                        let expanded_commands = template.expand(name);
+                        for cmd in expanded_commands {
+                            expanded_lines.push(cmd.to_string());
+                        }
+                    } else {
+                        // Regular module or unparseable - keep as-is
+                        expanded_lines.push(trimmed.to_string());
+                    }
+                } else {
+                    // Malformed module creation line
+                    expanded_lines.push(trimmed.to_string());
+                }
+            } else {
+                // Not a module creation - keep as-is
+                expanded_lines.push(trimmed.to_string());
+            }
+        }
+
+        expanded_lines
+    }
+
+    /// Preprocess a patch to expand user modules and resolve external connections
+    fn preprocess_patch(&self, patch_content: &str) -> String {
+        let mut expanded_lines = Vec::new();
+        let mut user_module_instances = std::collections::HashMap::new();
+
+        // Phase 1: Expand user modules and collect instance info
+        for line in patch_content.lines() {
+            let trimmed = line.trim();
+
+            // Skip empty lines and comments
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                expanded_lines.push(trimmed.to_string());
+                continue;
+            }
+
+            // Check if this looks like a module creation line
+            if let Some(colon_pos) = trimmed.find(':') {
+                let name = trimmed[..colon_pos].trim();
+                let rest = trimmed[colon_pos + 1..].trim();
+
+                // Extract the module type (first word after colon)
+                let parts: Vec<&str> = rest.split_whitespace().collect();
+                if let Some(module_type_str) = parts.first() {
+                    // Check if this is a user module type first
+                    if let Some(template) = self.user_modules.get(module_type_str) {
+                        // This is a user module - expand it
+                        expanded_lines.push(format!("# Expanding user module: {name}"));
+                        let expanded_commands = template.expand(name);
+                        for cmd in expanded_commands {
+                            expanded_lines.push(cmd.to_string());
+                        }
+
+                        // Store instance info for connection resolution
+                        user_module_instances.insert(name.to_string(), template.clone());
+                    } else {
+                        // Regular module or unparseable - keep as-is
+                        expanded_lines.push(trimmed.to_string());
+                    }
+                } else {
+                    // Malformed module creation line
+                    expanded_lines.push(trimmed.to_string());
+                }
+            } else {
+                // Not a module creation - keep as-is for now
+                expanded_lines.push(trimmed.to_string());
+            }
+        }
+
+        // Phase 2: Resolve external connections
+        let resolved_lines =
+            Self::resolve_external_connections(expanded_lines, &user_module_instances);
+
+        resolved_lines.join("\n")
+    }
+
+    /// Resolve external connection placeholders to actual connections
+    fn resolve_external_connections(
+        lines: Vec<String>,
+        user_module_instances: &std::collections::HashMap<
+            String,
+            crate::user_modules::UserModuleTemplate,
+        >,
+    ) -> Vec<String> {
+        let mut resolved_lines = Vec::new();
+
+        for line in lines {
+            if line.contains("EXTERNAL_INPUT_") || line.contains("EXTERNAL_OUTPUT_") {
+                // This is a connection with external placeholders - skip for now
+                // These will be resolved when we encounter the actual connections
+                continue;
+            }
+            if line.contains(" -> ") || line.contains(" <- ") {
+                // This might be a connection to/from a user module - resolve it
+                resolved_lines.push(Self::resolve_connection_line(&line, user_module_instances));
+            } else {
+                // Regular line - keep as-is
+                resolved_lines.push(line);
+            }
+        }
+
+        resolved_lines
+    }
+
+    /// Resolve a single connection line with user module ports
+    ///
+    /// # Errors
+    /// Returns an error if connection parsing fails
+    fn resolve_connection_line(
+        line: &str,
+        user_module_instances: &std::collections::HashMap<
+            String,
+            crate::user_modules::UserModuleTemplate,
+        >,
+    ) -> String {
+        // Check if this line contains connections to user module ports
+        let mut resolved_line = line.to_string();
+
+        // Parse connection direction
+        if let Some(arrow_pos) = line.find(" -> ") {
+            let from_part = line[..arrow_pos].trim();
+            let to_part = line[arrow_pos + 4..].trim();
+
+            let resolved_from = Self::resolve_module_port(from_part, user_module_instances, false);
+            let resolved_to = Self::resolve_module_port(to_part, user_module_instances, true);
+
+            resolved_line = format!("{resolved_from} -> {resolved_to}");
+        } else if let Some(arrow_pos) = line.find(" <- ") {
+            let to_part = line[..arrow_pos].trim();
+            let from_part = line[arrow_pos + 4..].trim();
+
+            let resolved_from = Self::resolve_module_port(from_part, user_module_instances, false);
+            let resolved_to = Self::resolve_module_port(to_part, user_module_instances, true);
+
+            resolved_line = format!("{resolved_to} <- {resolved_from}");
+        }
+
+        resolved_line
+    }
+
+    /// Resolve a module.port reference to internal implementation
+    fn resolve_module_port(
+        module_port: &str,
+        user_module_instances: &std::collections::HashMap<
+            String,
+            crate::user_modules::UserModuleTemplate,
+        >,
+        is_input: bool,
+    ) -> String {
+        // Check if this is a user module port reference
+        if let Some(dot_pos) = module_port.find('.') {
+            let module_name = &module_port[..dot_pos];
+            let port_name = &module_port[dot_pos + 1..];
+
+            // Check if this module is a user module instance
+            if let Some(template) = user_module_instances.get(module_name) {
+                // Map user module port to internal implementation
+                if is_input {
+                    // This is an input to the user module
+                    if template.inputs.contains(&port_name.to_string()) {
+                        // For now, map directly to the first internal module
+                        // This is a simplification - real implementation would need more sophisticated mapping
+                        return format!("{module_name}_vca.audio");
+                    }
+                } else {
+                    // This is an output from the user module
+                    if template.outputs.contains(&port_name.to_string()) {
+                        // For now, map directly to the first internal module
+                        return format!("{module_name}_vca.out");
+                    }
+                }
+            }
+        }
+
+        // Not a user module port, return as-is
+        module_port.to_string()
     }
 
     /// Validate all connections

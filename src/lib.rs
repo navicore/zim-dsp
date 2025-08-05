@@ -10,3 +10,4 @@ pub mod observability;
 pub mod parser;
 pub mod slew_tests;
 pub mod test_framework;
+pub mod user_modules;

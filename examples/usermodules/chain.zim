@@ -1,0 +1,18 @@
+# Chaining user modules together
+# Shows user modules connected in series
+
+# Create source oscillator
+vco: osc sine 440
+
+# Create a chain of gain stages
+preamp: simple_gain
+gain: simple_gain
+output_gain: simple_gain
+
+# Chain them together
+vco.sine -> preamp.audio
+preamp.out -> gain.audio
+gain.out -> output_gain.audio
+
+# Final output
+out <- output_gain.out
