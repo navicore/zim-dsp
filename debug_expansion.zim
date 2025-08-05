@@ -1,0 +1,4 @@
+vco: osc sine 440
+gain1: simple_gain
+vco.sine -> gain1.audio
+out <- gain1.out

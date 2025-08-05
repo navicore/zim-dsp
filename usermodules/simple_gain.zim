@@ -5,8 +5,10 @@ module simple_gain {
     
     # Internal modules
     vca: vca 0.5
+    constant_cv: lfo 0
     
     # Internal connections
     vca.audio <- $audio
+    vca.cv <- constant_cv.gate
     $out <- vca.out
 }

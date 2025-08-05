@@ -1,0 +1,18 @@
+# Multiple instances of the same user module
+# Shows that each instance gets its own internal modules
+
+# Create two oscillators
+vco1: osc sine 440
+vco2: osc saw 660
+
+# Create two separate gain instances
+gain1: simple_gain
+gain2: simple_gain
+
+# Connect each oscillator to its own gain
+vco1.sine -> gain1.audio
+vco2.saw -> gain2.audio
+
+# Mix the outputs to stereo
+out.left <- gain1.out
+out.right <- gain2.out
