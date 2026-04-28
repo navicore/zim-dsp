@@ -1,3 +1,8 @@
+<!-- ghmig:moved -->
+> **This repository has moved to [https://git.navicore.tech/navicore/zim-dsp](https://git.navicore.tech/navicore/zim-dsp).**
+>
+> The GitHub copy is archived and no longer maintained.
+
 # 🎚️ Zim-DSP
 
 A text-based modular synthesizer environment built on Rust's open audio ecosystem. Like patching hardware modules, but with the power of text and code.
